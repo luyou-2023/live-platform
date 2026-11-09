@@ -48,7 +48,11 @@ export default function WatchPage() {
           },
         });
         wsRef.current = ws;
-      } catch (e: any) { setErr(e.message); }
+      } catch (e: any) {
+        setErr(e.message);
+        // 进房失败（房间已下播/不存在）：3 秒后回直播列表
+        setTimeout(() => nav('/'), 3000);
+      }
     })();
     return () => {
       closed = true;
