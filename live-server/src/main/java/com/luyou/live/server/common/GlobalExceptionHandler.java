@@ -26,6 +26,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleOther(Exception e) {
+        e.printStackTrace();
         return ResponseEntity.ok(Map.of("code", 50000, "message", "internal error"));
     }
 }

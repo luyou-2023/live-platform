@@ -7,6 +7,7 @@ import io.livekit.server.IngressServiceClient;
 import livekit.LivekitIngress;
 
 import java.util.List;
+import java.util.UUID;
 import io.livekit.server.CanPublish;
 import io.livekit.server.CanSubscribe;
 import io.livekit.server.RoomAdmin;
@@ -43,9 +44,12 @@ public class LiveKitTokenIssuer implements TokenIssuer {
 
     @Override
     public LivekitToken issueSubscriber(String roomName, String identity) {
-        AccessToken token = baseToken(identity);
+        // 观众身份必须唯一：与主播同身份进房会互踢（观众刷新一次就把主播推流踢断）。
+        // LiveKit 身份仅用于媒体面，业务身份走我们自有 WS，加随机后缀不影响任何业务逻辑。
+        String subIdentity = identity + "-sub-" + UUID.randomUUID().toString().substring(0, 8);
+        AccessToken token = baseToken(subIdentity);
         token.addGrants(new RoomJoin(true), new RoomName(roomName), new CanSubscribe(true));
-        return toVo(roomName, identity, token);
+        return toVo(roomName, subIdentity, token);
     }
 
     @Override
