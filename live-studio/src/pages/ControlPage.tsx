@@ -28,14 +28,18 @@ export default function ControlPage() {
       const r = await api.roomDetail(roomId);
       setRoom(r);
       if (r.status === 'LIVING') {
-        // 刷新恢复：沿用开播时选择的推流方式
+        // 刷新恢复：记住开播时选择的推流方式；没记住（新会话）则让用户先选
         const saved = sessionStorage.getItem(modeKey);
-        setMode(saved === 'RTMP' ? 'RTMP' : 'WEBRTC');
+        if (saved === 'RTMP') {
+          setMode('RTMP');
+          api.obsInfo(roomId, obsProto).then(setObs).catch(() => setObs(null));
+        } else if (saved === 'WEBRTC') {
+          setMode('WEBRTC');
+        }
         const snap = await api.snapshot(roomId);
         setOnline(snap.online);
         setLikes(snap.likes);
         setComments(snap.comments);
-        if (saved === 'RTMP') api.obsInfo(roomId, obsProto).then(setObs).catch(() => setObs(null));
       }
     } catch (e: any) { setErr(e.message); }
   }
@@ -90,14 +94,25 @@ export default function ControlPage() {
     } catch (e: any) { setErr(e.message); }
   }
 
-  // 页面刷新后房间仍直播中但本机推流已断：补签 token 重新推流
+  // 页面刷新后房间仍直播中但本机推流已断：补签 token 重新推流（WebRTC 路径）
   async function republish() {
     setErr('');
     try {
       const res = await api.republishRoom(roomId);
-      if (res.obs) setObs(res.obs);
+      setMode('WEBRTC');
+      sessionStorage.setItem(modeKey, 'WEBRTC');
       await connectAndPublish(res.livekit);
     } catch (e: any) { setErr(e.message); }
+  }
+
+  /** 已进入进行中的直播：选择当前实际使用的推流方式 */
+  async function chooseLiving(chosen: 'WEBRTC' | 'RTMP') {
+    setErr('');
+    if (chosen === 'WEBRTC') { await republish(); return; }
+    setMode('RTMP');
+    sessionStorage.setItem(modeKey, 'RTMP');
+    try { setObs(await api.obsInfo(roomId, obsProto)); }
+    catch (e: any) { setErr(e.message); }
   }
 
   async function stop() {
@@ -149,6 +164,24 @@ export default function ControlPage() {
           <div className="row">
             <span style={{ color: '#4ade80' }}>● 直播中（等待 OBS 推流）</span>
             <button className="red" onClick={stop}>下播</button>
+          </div>
+        ) : mode === null ? (
+          <div>
+            <div className="muted" style={{ marginBottom: 10 }}>该房间正在直播中，选择当前使用的推流方式：</div>
+            <div className="row" style={{ gap: 12, alignItems: 'stretch' }}>
+              {([
+                ['WEBRTC', '摄像头+麦克风（WebRTC）', '本机浏览器推流：选这个重新推摄像头画面'],
+                ['RTMP', 'OBS 推流（RTMP/WHIP）', 'OBS 在推：选这个查看服务器与串流密钥'],
+              ] as const).map(([value, title, desc]) => (
+                <div key={value} onClick={() => chooseLiving(value)} style={{
+                  flex: 1, padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+                  border: '2px solid #262b3a',
+                }}>
+                  <b>{title}</b>
+                  <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>{desc}</div>
+                </div>
+              ))}
+            </div>
           </div>
         ) : publishing ? (
           <div className="row">
