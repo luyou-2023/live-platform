@@ -1,0 +1,28 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+
+title SFU vs MCU：为什么 LiveKit 选 SFU
+
+package "MCU（混合架构）" {
+  [主播] --> [MCU 服务器] : 原始流
+  [观众1] <-- [MCU 服务器] : 合成后单流
+  [观众2] <-- [MCU 服务器] : 合成后单流
+  note right of [MCU 服务器]
+    服务器解码→混屏→重编码
+    CPU 昂贵、延迟高
+    单一布局，灵活性差
+  end note
+}
+
+package "SFU（选择性转发）" {
+  [主播2] --> [SFU 服务器] : 一路上行
+  [观众A] <-- [SFU 服务器] : 只转发 RTP 包\n（可选分层/降码率）
+  [观众B] <-- [SFU 服务器] : 不混不解码
+  note right of [SFU 服务器]
+    不解码不重编码
+    N 个观众 ≈ N 倍带宽，CPU 几乎零增
+    观众可各自选清晰度
+  end note
+}
+@enduml

@@ -1,0 +1,92 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+
+title 核心对象模型（rtc 与 sfu 包）
+
+class RoomManager {
+  +getOrCreateRoom(name): Room
+  +deleteRoom(name)
+  +rooms: Map{name, Room}
+  +getRoomLoad(): int
+}
+
+class Room {
+  +name、sid
+  +participants: Map{identity, Participant}
+  +emptyTimeout: Duration
+  +departureTimeout: Duration
+  +joinParticipant(): LocalParticipant
+  +removeParticipant(reason)
+}
+
+abstract class Participant {
+  +identity、sid
+  +state: JOINING、JOINED、ACTIVE、DISCONNECTED
+  +permission: canPublish、canSubscribe
+  +transportManager
+  +disconnectReason
+}
+
+class LocalParticipant {
+  +publishTrack(track)
+  +unpublishTrack(sid)
+  +updateSubPermissions()
+  +subscriberRTCP 处理 NACK与PLI与TWCC
+}
+note right of LocalParticipant : 服务器视角的发流者（浏览器主播、ingress 都是）
+
+class RemoteParticipant {
+  +subscribedTracks
+  +updateSubscription(sid, subscribe)
+}
+note right of RemoteParticipant : 服务器视角的观看者
+
+class MediaTrack {
+  +receivers: MediaTrackReceiver 数组
+  +layers: 清晰度分层
+}
+
+class UpTrackManager {
+  +publishedTracks: Map{sid, MediaTrack}
+}
+
+class UpTrack {
+  +buffer: Buffer
+  +streamTracker: 活跃度检测
+}
+
+class DownTrack {
+  +forwarder: Forwarder
+  +selectedLayer: VideoLayer
+  +writeRTP(pkt)
+}
+
+class Forwarder {
+  +getTranslationParams(pkt)
+  +重写 SN TS SSRC
+}
+
+class Buffer {
+  +packetBuf: 环形缓冲
+  +nacker与pli统计
+  +stats: 丢包 RTT 抖动
+}
+
+class SubscriptionManager {
+  +resolve 订阅意图到 track 绑定
+}
+
+RoomManager o-- Room
+Room o-- Participant
+Participant <|-- LocalParticipant
+Participant <|-- RemoteParticipant
+LocalParticipant o-- UpTrackManager
+UpTrackManager o-- MediaTrack
+MediaTrack *-- UpTrack
+UpTrack *-- Buffer
+RemoteParticipant o-- DownTrack
+DownTrack *-- Forwarder
+DownTrack ..> Buffer : 从 publisher buffer 读取原始包
+Room o-- SubscriptionManager
+@enduml

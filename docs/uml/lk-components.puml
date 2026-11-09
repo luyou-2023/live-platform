@@ -1,0 +1,48 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+skinparam componentStyle rectangle
+
+title LiveKit 组件拓扑（单机/集群通用）
+
+[主播端 Chrome] as Anchor
+[观众端 Chrome] as Viewer1
+[观众端 Chrome 2] as Viewer2
+[OBS ffmpeg] as OBS
+
+package "livekit-server（Go, SFU 单二进制）" {
+  [RTC Service 信令] as RTC
+  [RoomManager 房间生命周期] as RM
+  [SFU 转发核心 Room、Participant、Track] as SFU
+  [RoomService API twirp] as Twirp
+  [UDP与TCP 媒体端口] as MEDIA
+}
+
+package "可选配套（独立二进制）" {
+  [ingress RTMP与WHIP接入] as ING
+  [egress 录制与合流] as EGR
+}
+
+database "Redis 集群模式必需" as REDIS
+
+Anchor --> RTC : 信令 WS
+Viewer1 --> RTC
+Viewer2 --> RTC
+RTC --> SFU
+RM --> SFU
+SFU --> MEDIA : SRTP over UDP
+Anchor --> MEDIA
+Viewer1 --> MEDIA
+Viewer2 --> MEDIA
+OBS --> ING : RTMP 或 WHIP
+ING --> SFU : 以参与者身份进房推流
+ING --> REDIS : 房间路由
+RTC --> REDIS : 节点注册与消息总线
+SFU --> REDIS
+Twirp --> SFU : CreateRoom、DeleteRoom
+EGR --> SFU : 订阅拉流
+note bottom
+  单机可不启动 Redis；ingress 与 egress 依赖 Redis 路由房间所在节点
+  媒体端口 rtc.udp_port(7882) + TCP fallback(7881)，rtc.node_ip 必须可达
+end note
+@enduml

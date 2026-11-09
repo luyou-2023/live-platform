@@ -1,0 +1,31 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+
+title live-platform 与 LiveKit 的接线关系（本仓库实测配置）
+
+package "live-server (Java)" {
+  [LiveKitTokenIssuer] as T
+  [RoomService\nstart/stop/republish] as RS
+}
+package "LiveKit" {
+  [livekit\ncompose 服务] as LK
+  [ingress\nRTMP 19350 / WHIP 8088] as ING
+  database "redis" as R
+}
+[主播浏览器\nstudio 5173] as A
+[观众浏览器\naudience 5174] as V
+
+RS -> T : issuePublisher(房间ID, 主播ID)
+RS -> T : issueSubscriber(房间ID, 观众ID+"-sub-"+随机)
+T --> A : publisher JWT
+T --> V : subscriber JWT（只订阅权限）
+A --> LK : /rtc + UDP 7882 推摄像头
+V --> LK : 观看
+RS -> LK : start 时 deleteRoom 幂等清理
+RS -> ING : ensureObsPublish(RTMP|WHIP)
+ING --> R : 必须同 redis 才能路由
+ING --> LK : 虚拟参与者进房
+note bottom of T : 血泪教训①：身份必须唯一\n观众不加后缀会把主播踢断\n血泪教训②：issueSubscriber 的\nLiveKit 身份 ≠ 业务身份\n（业务身份走自有 WS）
+note bottom of LK : rtc.node_ip=127.0.0.1\nUDP 7882 / TCP 7881 fallback\nDocker Desktop UDP 端口转发\n可能坏 → 宿主 UDP 不通但 TCP 通
+@enduml

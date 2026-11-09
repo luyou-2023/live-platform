@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LiveKit 内核剖析 - live-platform</title><style>
+  body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+         background: #0f1115; color: #e8e8ec; margin: 0; line-height: 1.7; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { border-bottom: 2px solid #2563eb; padding-bottom: 8px; font-size: 26px; }
+  h2 { margin-top: 48px; font-size: 20px; color: #93c5fd; border-left: 4px solid #2563eb; padding-left: 10px; }
+  h3 { font-size: 16px; color: #bfdbfe; }
+  code { background: #1b1f2a; border-radius: 4px; padding: 2px 6px; font-size: 13px;
+         font-family: "SF Mono", Menlo, monospace; color: #fbbf24; }
+  pre { background: #171a23; border: 1px solid #262b3a; border-radius: 8px;
+        padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; padding: 0; color: #d5dbe7; font-size: 13px; line-height: 1.6; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; display: block; overflow-x: auto; }
+  th, td { border: 1px solid #2b3245; padding: 8px 12px; text-align: left; }
+  th { background: #1b2233; color: #93c5fd; white-space: nowrap; }
+  tr:nth-child(even) td { background: #141824; }
+  img { max-width: 100%; background: #fff; border-radius: 8px; margin: 12px 0;
+        border: 1px solid #262b3a; }
+  blockquote { border-left: 3px solid #2563eb; margin: 12px 0; padding: 4px 16px; color: #9aa3b8; background:#141824; }
+  a { color: #6ea8fe; }
+  .nav { background: #141824; border-bottom: 1px solid #262b3a; padding: 10px 24px;
+         font-size: 13px; position: sticky; top: 0; }
+  .nav a { margin-right: 18px; }
+  .toc { background: #141824; border: 1px solid #262b3a; border-radius: 8px; padding: 12px 20px; font-size: 14px; }
+  .toc a { display: block; padding: 2px 0; }
+  .tag { display:inline-block; background:#1b2233; color:#93c5fd; border-radius:4px; padding:0 8px; font-size:12px; margin-right:6px; }
+</style></head>
+<body><div class="nav"><a href="01-structure.html">结构文档</a><a href="02-design.html">设计文档</a><a href="03-implementation.html">实现文档</a><a href="04-livekit-internals.html"><b>LiveKit 内核剖析</b></a></div><div class="wrap">
+
+<h1 id="top">LiveKit 内核剖析</h1>
+<blockquote>
+<p>版本：v1 · 2026-11-09 · 基于本仓库实际部署的 LiveKit Server 1.13.11（protocol 18）</p>
+<p>所有组件名、文件路径、参数值均来自本机运行实例的日志与配置原文，非泛泛而谈。</p>
+</blockquote>
+
+<div class="toc">
+<b>目录</b>
+<a href="#c1">第 1 章 · 总览：LiveKit 是什么</a>
+<a href="#c2">第 2 章 · 信令面：/rtc WebSocket</a>
+<a href="#c3">第 3 章 · 核心对象模型</a>
+<a href="#c4">第 4 章 · 媒体传输层</a>
+<a href="#c5">第 5 章 · 转发核心：SFU 的心脏</a>
+<a href="#c6">第 6 章 · 集群与 Redis</a>
+<a href="#c7">第 7 章 · Ingress：OBS 怎么进房间</a>
+<a href="#c8">第 8 章 · 本仓库接线与三次真实故障复盘</a>
+</div>
+
+<h2 id="c1">第 1 章 · 总览：LiveKit 是什么</h2>
+<p>LiveKit 是一个用 <b>Go</b> 编写的开源实时音视频服务器，架构角色是 <b>SFU（Selective Forwarding Unit，选择性转发单元）</b>。全部媒体转发逻辑在一个二进制内完成（本仓库部署的 <code>livekit-server 1.13.11</code>）；RTMP/WHIP 接入（ingress）、录制合流（egress）是可插拔的独立进程。</p>
+
+<img src="uml/lk-components.svg" alt="LiveKit 组件拓扑">
+
+<h3>1.1 SFU 与 MCU 的本质区别</h3>
+<img src="uml/lk-sfu-mcu.svg" alt="SFU vs MCU">
+<p>一句话：<b>SFU 只搬包，不拆包</b>。主播一路视频流上行到服务器，服务器按订阅关系把 RTP 包原样（只改包头序列号）转发给每个观众。服务器不做解码、混屏、重编码，因此 CPU 成本几乎不随观众数增长，代价是带宽按观众数线性增长——这是纯转发架构的公平交易。</p>
+<blockquote>对照排障经验：obs_anchor 房间 1 主播 1 观众时，服务器 CPU 几乎不动，这符合 SFU 特征；如果换成 MCU，1 个观众就要开始吃转码资源。</blockquote>
+
+<h3>1.2 三个面</h3>
+<table>
+<tr><th>面</th><th>协议</th><th>端口（本仓库）</th><th>内容</th></tr>
+<tr><td>信令面</td><td>WebSocket（/rtc）</td><td>7880</td><td>join、发布、订阅、ping/pong、房间事件推送</td></tr>
+<tr><td>媒体面</td><td>UDP/DTLS/SRTP</td><td>7882（UDP）、7881（TCP fallback）</td><td>RTP 音视频包本身</td></tr>
+<tr><td>管理面</td><td>HTTP twirp</td><td>7880</td><td>RoomService：CreateRoom/DeleteRoom/ListParticipants，给业务服务器用</td></tr>
+</table>
+<p>记住这个三分法，后面所有排障都是先定位"死在哪个面"。</p>
+
+<h2 id="c2">第 2 章 · 信令面：/rtc WebSocket</h2>
+<p>客户端与 LiveKit 之间只有一条 WebSocket（<code>/rtc</code>），上面跑 protobuf 定义的 <code>SignalRequest/SignalResponse</code>。服务端入口代码 <code>service/rtcservice.go</code>（本机日志中出现 3600+ 次，是最热的文件）。</p>
+
+<h3>2.1 进房全流程</h3>
+<img src="uml/lk-join-seq.svg" alt="进房信令时序图">
+<p>要点：</p>
+<ul>
+<li><b>JWT 在握手阶段校验</b>：<code>/rtc?access_token=JWT</code>。grants 决定权限（<code>roomJoin</code>、<code>canPublish</code>、<code>canSubscribe</code>）。业务服务器（我们的 live-server）通过 LiveKit SDK 用 apiKey/apiSecret 签 JWT。</li>
+<li><b>join 一次性带齐</b>：身份、权限、PublisherOffer（SDP）全在 participantInit 里，减少往返。</li>
+<li><b>服务端在 JoinResponse 里下发保活参数</b>：本机实测 <code>pingInterval: 5, pingTimeout: 15</code>——客户端每 5 秒 ping，15 秒无 ping 服务端判死踢人。<b>这是识别"僵尸连接"的判据</b>（第 8 章复盘会用到）。</li>
+</ul>
+
+<h3>2.2 断开的理由：DisconnectReason</h3>
+<p>每次 participant 离开都带原因码（<code>rtc/participant.go</code> 的 <code>disconnectReason</code> 字段），排障时先查它：</p>
+<table>
+<tr><th>原因</th><th>含义</th><th>我们平台对应场景</th></tr>
+<tr><td>CLIENT_INITIATED</td><td>客户端主动 leave</td><td>正常下播、重新推流先断旧连接</td></tr>
+<tr><td>DUPLICATE_IDENTITY</td><td>同身份新连接进房，旧连接被踢</td><td><b>观众与主播同账号（第 8 章复盘②）</b>；重推流不断旧 Room（复盘①）</td></tr>
+<tr><td>SERVER_SHUTDOWN</td><td>服务端重启</td><td>docker 重启 livekit 容器</td></tr>
+<tr><td>PARTICIPANT_REMOVED</td><td>管理 API 踢人</td><td>DeleteRoom 连带全员离开</td></tr>
+<tr><td>ROOM_DELETED</td><td>房间被删</td><td>我们的 start 接口幂等清理残留房间</td></tr>
+<tr><td>STATE_MISMATCH</td><td>重连状态不一致</td><td>弱网重连竞态</td></tr>
+<tr><td>TIMEOUT / SIGNAL_CLOSE</td><td>保活超时 / 信令 WS 断开</td><td>网络中断、代理掐 WS</td></tr>
+</table>
+
+<h2 id="c3">第 3 章 · 核心对象模型</h2>
+<p>对象模型决定你能读懂日志。以下类图全部来自 <code>rtc</code>/<code>sfu</code> 包的真实结构（类名与日志中的文件名一一对应）：</p>
+<img src="uml/lk-object-model.svg" alt="核心对象模型类图">
+
+<h3>3.1 一棵管理树</h3>
+<pre><code>RoomManager ──rooms──&gt; Room ──participants──&gt; Participant(Local/Remote)
+Room ──subscriptionManager──&gt; SubscriptionManager
+LocalParticipant ──upTrackManager──&gt; UpTrackManager ──&gt; MediaTrack ──&gt; UpTrack ──buffer──&gt; Buffer
+RemoteParticipant ──&gt; DownTrack ──forwarder──&gt; Forwarder</code></pre>
+
+<h3>3.2 服务器视角的"参与者"</h3>
+<p><b>LocalParticipant = 发流的人</b>，RemoteParticipant = 收流的人。注意这是<b>服务器视角</b>：不管对方是 Chrome 里的主播、还是 ingress 虚拟推流器，只要它往房间里发 track，在服务器里就是 LocalParticipant。我们第 7 章会看到 ingress 正是利用这一点"伪装"成主播。</p>
+
+<h3>3.3 Participant 状态机</h3>
+<p><code>JOINING → JOINED → ACTIVE → DISCONNECTED</code>。本机日志原文（<code>rtc/participant.go:2329</code> "updating participant state"）：</p>
+<ul>
+<li>WS 建立后 <code>state: JOINING</code></li>
+<li>ICE/DTLS 完成后变 <code>ACTIVE</code>（日志级别 INFO，<code>rtc/room.go:1284</code> "participant active"）</li>
+<li>离开时 <code>DISCONNECTED</code>，携带 disconnectReason</li>
+</ul>
+<blockquote>排障技巧：在 livekit 日志里 grep "updating participant state" + 房间名，就能看到每个参与者的完整生命周期。</blockquote>
+
+<h2 id="c4">第 4 章 · 媒体传输层</h2>
+<h3>4.1 双 transport 设计</h3>
+<p>每个 Participant 持有两条 Pion WebRTC PeerConnection（<code>rtc/transport.go</code>，本机日志 1200+ 次）：</p>
+<ul>
+<li><b>PUBLISHER transport</b>：客户端 → 服务器（发流者上行）。</li>
+<li><b>SUBSCRIBER transport</b>：服务器 → 客户端（给该参与者推别人的流）。</li>
+</ul>
+<p>看日志时 "transport": "PUBLISHER" / "SUBSCRIBER" 标注了每条 ICE 状态变化属于哪条连接。</p>
+
+<h3>4.2 端口与连通性（本仓库配置实证）</h3>
+<pre><code># live-deployment/livekit.yaml
+port: 7880                    # 信令 + 管理 HTTP
+rtc:
+  tcp_port: 7881              # 媒体 TCP fallback
+  udp_port: 7882              # 媒体主通道 UDP
+  node_ip: 127.0.0.1          # 通告给客户端的服务器地址</code></pre>
+<p>ICE 候选由服务器下发（含 <code>stun:global.stun.twilio.com</code> 等公网 STUN，本机日志原文）。libwebrtc 会优先尝试 UDP，失败自动回退 TCP 7881——<b>排障实录</b>：本机 Docker Desktop 的 UDP 端口转发坏掉时，宿主机 UDP 7882 不通但 TCP 7881 通，浏览器推流不受影响，而纯 UDP 的 ffmpeg WHIP 就推不动。</p>
+
+<h3>4.3 安全栈</h3>
+<p>DTLS 握手（指纹在 SDP <code>fingerprint:sha-256</code> 里可见）→ 密钥派生 → SRTP 加解密。全程发生在 transport 层，对上层转发完全透明。</p>
+
+<h2 id="c5">第 5 章 · 转发核心：SFU 的心脏</h2>
+<h3>5.1 一路包的一生</h3>
+<img src="uml/lk-media-path.svg" alt="媒体面数据流">
+<p>上行的关键在 <code>buffer/buffer.go</code>：每个上行 track 一个环形包缓冲，做三件事：</p>
+<ol>
+<li><b>统计</b>：丢包、RTT、抖动——喂给带宽估计；</li>
+<li><b>NACK</b>：记录最近发出的包，下行观众丢包时可从缓冲重发（RTX 流），不用麻烦主播重传；</li>
+<li><b>PLI/FIR 统计</b>：新观众进房要关键帧时，代观众向主播讨要。</li>
+</ol>
+
+<h3>5.2 Forwarder：只改包头的翻译器</h3>
+<p><code>sfu/forwarder.go</code> 是每个下行订阅独立持有的。它不解码视频，只做<b>序列号/时间戳/SSRC 重映射</b>（不同观众丢包历史不同，SN 空间必须独立）。这是 SFU 与"IP 组播"的本质区别：每个观众是一条独立的 RTP 会话。</p>
+
+<h3>5.3 分层与省带宽</h3>
+<img src="uml/lk-forwarder.svg" alt="转发核心机制">
+<ul>
+<li><b>Simulcast 分层选择</b>（<code>videolayerselector/simulcast.go</code>）：Chrome 摄像头默认发三档清晰度，服务器按观众窗口大小/带宽选一层转发，切层无需重新协商。</li>
+<li><b>Dynacast</b>（<code>dynacast/dynacastmanagervideo.go</code>，本机日志 90+ 次）：<b>房间里没人看某路流时，服务器通知发布端暂停发送该层</b>——直接省主播上行带宽。</li>
+<li><b>DependencyDescriptor 解析</b>（<code>buffer/dependencydescriptorparser.go</code>）：AV1/SVC 可伸缩编码的帧依赖关系解析，比 simulcast 更细粒度。</li>
+</ul>
+
+<h2 id="c6">第 6 章 · 集群与 Redis</h2>
+<img src="uml/lk-cluster.svg" alt="LiveKit 集群架构">
+<p>单机部署不需要 Redis（本仓库仍配了，因为 ingress 需要）。集群模式下 Redis 承担三件事：</p>
+<ol>
+<li><b>房间路由</b>：roomName → nodeId。新连接来了先查房间在哪个节点；</li>
+<li><b>跨节点消息</b>：Pub/Sub 主题按 node/room 组织，ingress 在节点 A 收到的流要能推进节点 B 上的房间，全靠它中转；</li>
+<li><b>节点心跳</b>：活节点集合，供调度选节点。</li>
+</ol>
+<blockquote><b>铁律：Redis 只承载控制面，媒体 RTP 永远 UDP 直连节点本身。</b>集群加 Redis 不会成为媒体瓶颈。</blockquote>
+<p>给业务服务器用的管理 API 是 <code>service/twirp.go</code> 暴露的 RoomService（CreateRoom/DeleteRoom/ListParticipants/ListRooms），走 HTTP + JWT，我们 live-server 的 <code>LiveKitTokenIssuer</code> 就是它的 Java 客户端封装。</p>
+
+<h2 id="c7">第 7 章 · Ingress：OBS 怎么进房间</h2>
+<p>ingress 是一个独立进程（<code>livekit/ingress</code>），职责一句话：<b>把 RTMP/WHIP 流转成"一个虚拟主播"</b>。本仓库 compose 中映射 RTMP <code>19350:1935</code>、WHIP <code>8088:8088</code>（宿主 1935 被占）。</p>
+<img src="uml/lk-ingress-seq.svg" alt="Ingress 时序图">
+<h3>7.1 三个配置为什么缺一不可（全部来自排障实录）</h3>
+<table>
+<tr><th>配置</th><th>少了会怎样</th><th>当时的报错原文</th></tr>
+<tr><td><code>redis.address</code></td><td>ingress 找不到房间所在节点</td><td>ingress 日志 ws 连不上 / 房间路由失败</td></tr>
+<tr><td><code>api_key/api_secret</code></td><td>虚拟参与者进房鉴权失败</td><td><code>invalid authorization header. Must start with Bearer</code>；裸调 CreateIngress 得 <code>invalid ingress: no participant identity</code></td></tr>
+<tr><td>compose 清空代理 env</td><td>ingress 容器内经代理的 WS 被掐</td><td>ingress 日志显示 ws 连不上 livekit（Docker 自动注入 HTTP_PROXY 所致）</td></tr>
+</table>
+<h3>7.2 streamKey 的语义</h3>
+<p>CreateIngress 时生成 streamKey，OBS 的推流地址 = <code>rtmp://host:1935/live/&lt;streamKey&gt;</code>。ingress 收到 RTMP 后用 streamKey 反查 ingress 记录 → 目标房间 → Redis 路由 → 进房推流。<b>streamKey 即凭据</b>，下播换 key 即轮换凭据——这就是为什么我们控制台把服务器/密钥显示为只读框。</p>
+<p>RTMP 与 WHIP 各建一个 ingress（命名 <code>obs-&lt;room&gt;</code> / <code>obs-&lt;room&gt;-whip</code>），幂等复用，已在 <code>LiveKitTokenIssuer.ensureObsPublish</code> 实现。</p>
+
+<h2 id="c8">第 8 章 · 本仓库接线与三次真实故障复盘</h2>
+<img src="uml/lk-platform-map.svg" alt="live-platform 与 LiveKit 接线">
+<p>我们平台与 LiveKit 的全部接触面只有三个：签发 token（Java SDK）、管理房间（twirp API）、OBS 入口（ensureObsPublish）。业务身份（评论/点赞/关注）完全走自有 WebSocket，与 LiveKit 身份无关——记住这个边界，下面的复盘②才不会犯。</p>
+
+<h3>复盘 ①：重复推流死锁（2026-11-09 修复）</h3>
+<table>
+<tr><th>项</th><th>内容</th></tr>
+<tr><td>现象</td><td>点「重新推流」后观众黑屏，页面报"推流连接已断开"</td></tr>
+<tr><td>LiveKit 日志证据</td><td>同身份第二个连接 join（Reconnect:false）→ 旧 participant closing</td></tr>
+<tr><td>根因</td><td>前端建了新 Room 但没先断旧 Room：LiveKit 同身份互踢踢掉正在推流的旧连接；旧 Room 还占着摄像头，新连接取流失败</td></tr>
+<tr><td>修复</td><td><code>connectAndPublish</code> 第一步 <code>lkRoomRef.current.disconnect()</code>（commit 4e24d0b）</td></tr>
+</table>
+
+<h3>复盘 ②：观众刷新踢断主播（2026-11-09 修复，最经典）</h3>
+<table>
+<tr><th>项</th><th>内容</th></tr>
+<tr><td>现象</td><td>"观看一刷页面，主播端就黑屏"；服务器侧主播 participant 状态 ACTIVE 但 tracks 为空</td></tr>
+<tr><td>排查路径</td><td>画布流对照实验排除媒体链路 → livekit 日志发现同身份互踢 → 意识到测试用同一账号既当主播又当观众</td></tr>
+<tr><td>根因</td><td>观众 token 直接用用户 ID 当 LiveKit 身份，与主播身份相同 → 观众每次进房都把主播踢下线</td></tr>
+<tr><td>修复</td><td>issueSubscriber 身份改为 <code>用户ID-sub-随机8位</code>（commit 88a01ea）。LiveKit 身份只是媒体面标识，业务身份走自有 WS，互不影响</td></tr>
+</table>
+
+<h3>复盘 ③：媒体面"看似不通"（Docker Desktop UDP 转发）</h3>
+<table>
+<tr><th>项</th><th>内容</th></tr>
+<tr><td>现象</td><td>ffmpeg WHIP（纯 UDP）推流失败，但浏览器 WebRTC 正常</td></tr>
+<tr><td>证据</td><td>宿主 UDP 7882 不可达，容器网内 UDP 正常；ICE 日志显示 libwebrtc 回退 TCP 7881</td></tr>
+<tr><td>结论</td><td>Docker Desktop UDP 端口转发坏（macOS 已知问题）。浏览器无感（TCP fallback），原生 UDP 客户端会踩坑</td></tr>
+</table>
+
+<h3>8.1 排障速查（按"面"定位）</h3>
+<pre><code>信令问题 → docker compose logs livekit | grep rtcservice
+           看 "join request validated" / "signal stream closed"
+媒体问题 → grep "ice connection state change"（UDP 不通看有没有走 tcp fallback）
+谁踢了谁 → grep "participant closing" 看 reason 字段
+僵尸连接 → grep "updating participant state" 看状态与 ping 中断点
+ingress  → grep -i ingress 容器日志 + redis.address/api_key 三连检查</code></pre>
+
+<hr>
+<p style="color:#9aa3b8;font-size:13px">文档版本 v1 · 基于 LiveKit Server 1.13.11 实测 · 配套 UML 源文件：<code>docs/uml/lk-*.puml</code></p>
+</div></body></html>

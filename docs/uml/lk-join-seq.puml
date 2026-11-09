@@ -1,0 +1,35 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+
+title 进房信令全流程（/rtc WebSocket）
+
+participant "浏览器\nlivekit-client JS" as JS
+participant "RTC Service\nservice/rtcservice.go" as RTC
+participant "RoomManager\nservice/roommanager.go" as RM
+participant "Room\nrtc/room.go" as ROOM
+participant "Participant\nrtc/participant.go" as P
+
+== 前提：业务侧已签发 JWT ==
+JS -> RTC : GET /rtc?access_token=JWT\n(WebSocket 升级)
+RTC -> RTC : 校验 JWT grants\n(video.room / roomJoin / canPublish)
+RTC -> RM : 定位或创建房间
+RM -> ROOM : getOrCreateRoom(roomName)
+JS -> RTC : SignalRequest{ join,\n participantInit: 身份/权限/\n publisherOffer(SDP) }
+RTC -> ROOM : JoinParticipant()
+ROOM -> P : 创建 Participant\n(JOINING → JOINED)
+ROOM --> RTC : JoinResponse{ 房间信息,\n 其他参与者列表, ICE servers,\n pingInterval=5s, pingTimeout=15s }
+RTC --> JS : SignalResponse{ join }
+== ICE/DTLS 握手 ==
+JS <-> P : ICE trickle 候选交换\n(STUN/UDP mux)
+JS <-> P : DTLS 握手 → SRTP 密钥派生
+P -> P : 媒体 transport 状态 connected
+P -> ROOM : 状态 ACTIVE
+ROOM --> JS : participant update\n(state=ACTIVE)
+== 保活（全生命周期） ==
+loop 每 5 秒
+  JS -> RTC : SignalRequest{ ping }
+  RTC --> JS : SignalResponse{ pong }
+end
+note over JS, RTC : 15 秒无 ping 判死\n服务端踢掉 participant\n（排障时用于识别僵尸连接）
+@enduml

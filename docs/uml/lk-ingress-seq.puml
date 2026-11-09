@@ -1,0 +1,25 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+
+title Ingress 剖析：OBS 的 RTMP 怎么变成房间里的参与者
+
+participant "OBS / ffmpeg" as OBS
+participant "ingress\nlivekit/ingress 独立进程" as ING
+participant "Redis" as REDIS
+participant "livekit-server\n（房间所在节点）" as SFU
+participant "观众" as V
+
+== 服务端准备（TokenIssuer.ensureObsPublish）==
+SFU -> SFU : CreateIngress API\n(name=obs-<room>,\n participant identity=obs-<room>,\n input=RTMP/WHIP)
+SFU --> REDIS : 写入 ingress 状态\n（streamKey 在此生成）
+== 推流 ==
+OBS -> ING : RTMP 推流\nrtmp://host:1935/live/<streamKey>
+ING -> REDIS : 查询 streamKey 对应\ningress 记录 → 目标房间
+ING -> REDIS : 路由查询房间所在节点
+ING -> SFU : 以 SDK 参与者身份\nWS /rtc 进房 + WebRTC 上行
+note over ING : ingress 本质就是一个\n"没有浏览器的虚拟主播"
+SFU -> V : 转发 obs-<room> 的 track\n（观众无感知来源）
+== 为什么 ingress 要 api_key/api_secret ==
+note over ING, SFU : ingress 用自己的 key 签 JWT 进房\n配错或不配 → "invalid authorization header"\n这是排障实录：docker 内代理变量\n还会掐断 ingress→livekit 的 WS
+@enduml

@@ -1,0 +1,35 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+
+title 媒体面数据流：一路视频如何从主播到观众
+
+participant "主播浏览器" as A
+participant "Transport\n(Pion WebRTC)" as PT
+participant "Buffer\nbuffer/buffer.go" as BUF
+participant "UpTrack\nsfu/uplink" as UP
+participant "Forwarder\nsfu/forwarder.go" as FW
+participant "DownTrack\nsfu/downtrack.go" as DT
+participant "订阅者 Transport" as ST
+participant "观众浏览器" as V
+
+== 上行 ==
+A -> PT : SRTP 视频包 (UDP 7882)
+PT -> BUF : 解 SRTP → RTP
+BUF -> BUF : 环形缓冲 +\n丢包统计/NACK 生成
+BUF -> UP : 读取最新包
+UP -> FW : RTP 包 + 分层信息
+note over FW : 不解码！只改包头
+== 下行（按订阅者） ==
+FW -> DT : 重写 SN/TS/SSRC\n按选定清晰度抽层
+DT -> ST : SRTP 加密写 UDP
+ST -> V : 渲染
+== 反向控制 ==
+V --> DT : RTCP RR (接收质量)
+DT --> FW : 上行反馈 TWCC/REMB
+FW --> A : 码率自适应
+DT --> UP : NACK 重传请求
+UP --> BUF : 从缓冲重取丢失包
+BUF --> A : 重传 (RTX 流)
+note over BUF, DT : 关键：服务器只做\n「选路 + 包头重写 + 缓冲重传」\n全程不碰视频编码
+@enduml

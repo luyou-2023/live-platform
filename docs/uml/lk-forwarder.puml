@@ -1,0 +1,32 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+
+title 转发核心机制一张图
+
+package "每个上行 track" {
+  [Buffer\n缓冲+NACK+统计] as B
+  [StreamTracker\n包活跃度检测] as ST
+  [DependencyDescriptor\nParser\n(AV1/SVC 依赖)] as DD
+}
+
+package "每个订阅（DownTrack）" {
+  [VideoLayerSelector\nvideolayerselector/simulcast.go] as LS
+  [Forwarder\nSN/TS 重映射] as FW
+  [RTCP 处理\nRR/TWCC/PLI] as RTCP
+}
+
+package "房间级" {
+  [DynacastManager\ndynacast/*] as DYNA
+  [SubscriptionManager\nrtc/subscriptionmanager.go] as SUB
+}
+
+B --> ST : 到达统计
+B --> DD : 扩展头解析
+LS --> B : 选定层 → 只转发该层
+FW --> LS : 帧转发决策
+RTCP --> FW : 丢包/RTT → 触发 PLI/\n切层/降帧率
+DYNA --> B : 无订阅者时\n暂停该层上行反馈
+SUB --> LS : 观众订阅/退订\n驱动建/拆 DownTrack
+note bottom of DYNA : 没人看就通知主播别发\n（省上行带宽，实测日志可见 dynacastmanagervideo）
+@enduml

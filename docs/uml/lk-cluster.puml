@@ -1,0 +1,36 @@
+@startuml
+!theme plain
+skinparam backgroundColor #ffffff
+
+title LiveKit 集群：Redis 是消息总线不是媒体面
+
+package "节点 A" {
+  [RTC Service] as RA
+  [Room 2222] as R1
+  [Room 3333] as R2
+}
+package "节点 B" {
+  [RTC Service] as RB
+  [Room 2222 只在节点A] as R3
+}
+database "Redis" {
+  [Pub/Sub 主题] as PUBSUB
+  [节点心跳 集合] as HEARTBEAT
+  [房间路由 room-nodeId] as ROUTE
+}
+
+RA --> ROUTE : 注册房间归属
+RB --> ROUTE : 查询房间所在节点
+RA --> PUBSUB : 跨节点信令转发
+RB --> PUBSUB : 订阅节点消息
+RA --> HEARTBEAT : 周期心跳
+note right of PUBSUB
+  ingress 配置必须填 redis.address：
+  ingress 收到的 RTMP 流经 Redis
+  路由到房间所在节点的 SFU 推流
+end note
+note bottom
+  媒体 RTP 永远走 UDP 直连节点
+  Redis 只承载控制面
+end note
+@enduml
