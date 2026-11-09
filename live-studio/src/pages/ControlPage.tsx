@@ -68,14 +68,30 @@ export default function ControlPage() {
 
   async function connectAndPublish(livekit: any) {
     const lk = new Room();
-    await lk.connect(livekit.serverUrl, livekit.token);
-    await lk.localParticipant.enableCameraAndMicrophone();
+    try {
+      await lk.connect(livekit.serverUrl, livekit.token);
+      try {
+        await lk.localParticipant.enableCameraAndMicrophone();
+      } catch (e: any) {
+        // 取设备失败：给出可读原因，断开空连接
+        lk.disconnect();
+        const name = e?.name || '';
+        if (name === 'NotAllowedError') throw new Error('摄像头/麦克风权限被拒绝：点浏览器地址栏左侧的摄像头图标，选择「允许」后重试');
+        if (name === 'NotFoundError') throw new Error('没有找到摄像头/麦克风设备');
+        if (name === 'NotReadableError' || name === 'AbortError') throw new Error('摄像头/麦克风被其他应用（OBS、微信等）占用，关闭占用程序后重试');
+        throw new Error('打开摄像头/麦克风失败：' + (e?.message || e));
+      }
+    } catch (e: any) {
+      lk.disconnect();
+      throw e;
+    }
     lkRoomRef.current = lk;
     (window as any).__lkRoom = lk;
     setPublishing(true);
     // 摄像头/麦克风被系统或其他应用（OBS、微信等）抢走时， track 会 ended：明确提示而非无声黑屏
     lk.localParticipant.trackPublications.forEach(pub => {
       pub.track?.mediaStreamTrack?.addEventListener('ended', () => {
+        lkRoomRef.current = null;
         setPublishing(false);
         setErr('摄像头/麦克风已停止：可能被 OBS、微信等应用占用。关闭占用程序后点「重新推流」恢复。');
       });
@@ -124,6 +140,17 @@ export default function ControlPage() {
     sessionStorage.setItem(modeKey, 'RTMP');
     try { setObs(await api.obsInfo(roomId, obsProto)); }
     catch (e: any) { setErr(e.message); }
+  }
+
+  /** 切回推流方式选择（本机摄像头断开时改 OBS，或反之） */
+  function switchMode() {
+    lkRoomRef.current?.disconnect();
+    lkRoomRef.current = null;
+    setPublishing(false);
+    setObs(null);
+    setErr('');
+    sessionStorage.removeItem(modeKey);
+    setMode(null);
   }
 
   async function stop() {
@@ -175,6 +202,7 @@ export default function ControlPage() {
           <div className="row">
             <span style={{ color: '#4ade80' }}>● 直播中（等待 OBS 推流）</span>
             <button className="red" onClick={stop}>下播</button>
+            <button className="gray" onClick={switchMode}>切换推流方式</button>
           </div>
         ) : mode === null ? (
           <div>
@@ -198,11 +226,13 @@ export default function ControlPage() {
           <div className="row">
             <span style={{ color: '#4ade80' }}>● 推流中</span>
             <button className="red" onClick={stop}>下播</button>
+            <button className="gray" onClick={switchMode}>切换推流方式</button>
           </div>
         ) : (
           <div className="row">
-            <span style={{ color: '#fbbf24' }}>房间直播中，但本机推流已断开（页面刷新导致）</span>
+            <span style={{ color: '#fbbf24' }}>房间直播中，但本机推流已断开</span>
             <button onClick={republish}>重新推流</button>
+            <button className="gray" onClick={switchMode}>切换推流方式</button>
           </div>
         )}
         {mode !== 'RTMP' && <div ref={previewRef} className="row" style={{ marginTop: 12, flexWrap: 'wrap' }} />}
