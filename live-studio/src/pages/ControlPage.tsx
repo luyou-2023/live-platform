@@ -122,17 +122,27 @@ export default function ControlPage() {
       <div className="card">
         {room?.status !== 'LIVING' ? (
           <div>
-            <div className="muted" style={{ marginBottom: 10 }}>选择推流方式后开播：</div>
-            <div className="row" style={{ gap: 12 }}>
-              <button onClick={() => start('WEBRTC')} disabled={publishing}>
-                {room?.status === 'ENDED' ? '重新开播' : '开播'}（摄像头+麦克风 / WebRTC）
-              </button>
-              <button onClick={() => start('RTMP')}>
-                {room?.status === 'ENDED' ? '重新开播' : '开播'}（OBS 推流 / RTMP）
-              </button>
+            <div className="muted" style={{ marginBottom: 10 }}>1. 选择推流方式：</div>
+            <div className="row" style={{ gap: 12, alignItems: 'stretch' }}>
+              {([
+                ['WEBRTC', '摄像头+麦克风（WebRTC）', '浏览器直接推摄像头画面，点开播即用'],
+                ['RTMP', 'OBS 推流（RTMP/WHIP）', '用 OBS 推专业画面，开播后页面显示服务器与串流密钥'],
+              ] as const).map(([value, title, desc]) => (
+                <div key={value} onClick={() => setMode(value)} style={{
+                  flex: 1, padding: '12px 14px', borderRadius: 8, cursor: 'pointer',
+                  border: mode === value ? '2px solid #4ade80' : '2px solid #262b3a',
+                  background: mode === value ? '#12261a' : 'transparent',
+                }}>
+                  <b>{title}</b>
+                  <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>{desc}</div>
+                </div>
+              ))}
             </div>
-            <div className="muted" style={{ marginTop: 8 }}>
-              WebRTC：浏览器直接推摄像头画面；OBS 推流：开播后页面显示服务器与串流密钥，到 OBS 里填。
+            <div className="row" style={{ marginTop: 14 }}>
+              <button onClick={() => mode && start(mode)} disabled={mode === null || publishing}>
+                2. {room?.status === 'ENDED' ? '重新开播' : '开始直播'}
+              </button>
+              {mode === null && <span className="muted">← 先点上方选择一种推流方式</span>}
             </div>
           </div>
         ) : mode === 'RTMP' ? (
