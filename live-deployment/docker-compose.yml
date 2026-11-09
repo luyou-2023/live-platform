@@ -25,6 +25,29 @@ services:
       - "7882:7882/udp" # WebRTC 媒体（rtc.node_ip=127.0.0.1）
     volumes:
       - ./livekit.yaml:/etc/livekit/livekit.yaml
+    depends_on:
+      - redis
+
+  # RTMP 推流入口（OBS 推流经此进入直播房间）
+  ingress:
+    image: livekit/ingress:latest
+    command: --config /etc/livekit-ingress/ingress.yaml
+    ports:
+      - "19350:1935"    # RTMP（宿主 1935 被本机其他进程占用，映射到 19350）
+    volumes:
+      - ./ingress.yaml:/etc/livekit-ingress/ingress.yaml
+    environment:
+      HTTP_PROXY: ""
+      HTTPS_PROXY: ""
+      ALL_PROXY: ""
+      http_proxy: ""
+      https_proxy: ""
+      all_proxy: ""
+      NO_PROXY: "livekit,redis,localhost,127.0.0.1"
+      no_proxy: "livekit,redis,localhost,127.0.0.1"
+    depends_on:
+      - livekit
+      - redis
 
 volumes:
   mysql-data:

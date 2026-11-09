@@ -22,6 +22,7 @@ livekit:
   url: ${LIVEKIT_URL:ws://127.0.0.1:7880}
   api-key: ${LIVEKIT_API_KEY:devkey}
   api-secret: ${LIVEKIT_API_SECRET:secret}
+  rtmp-public-url: ${LIVEKIT_RTMP_PUBLIC_URL:rtmp://127.0.0.1:19350/live}
 
 jwt:
   secret: ${LIVE_JWT_SECRET:live-platform-dev-secret-0123456789abcdef-change-in-prod}

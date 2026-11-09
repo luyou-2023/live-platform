@@ -1,0 +1,16 @@
+redis:
+  address: redis:6379
+
+ws_url: ws://livekit:7880
+
+# ingress 以参与者身份进房推流所需凭据（与 livekit.yaml keys 一致）
+api_key: devkey
+api_secret: secret
+
+rtmp_port: 1935
+http_relay_port: 9090
+rtc_port: 9091
+prometheus_port: 9999
+
+logging:
+  level: info

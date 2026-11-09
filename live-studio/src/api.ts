@@ -32,6 +32,7 @@ export const api = {
   startRoom: (roomId: string) => req('POST', `/api/v1/rooms/${roomId}/start`),
   stopRoom: (roomId: string) => req('POST', `/api/v1/rooms/${roomId}/stop`),
   republishRoom: (roomId: string) => req('POST', `/api/v1/rooms/${roomId}/republish`),
+  obsInfo: (roomId: string) => req('GET', `/api/v1/rooms/${roomId}/obs`),
   roomDetail: (roomId: string) => req('GET', `/api/v1/rooms/${roomId}`),
   mute: (roomId: string, userId: string, minutes: number) => req('POST', `/api/v1/rooms/${roomId}/mute`, { userId, minutes }),
   liveList: () => req('GET', '/api/v1/rooms/live'),

@@ -7,6 +7,7 @@ import com.luyou.live.server.live.domain.LivekitToken;
 import com.luyou.live.server.live.domain.RoomEvents.RoomCreated;
 import com.luyou.live.server.live.domain.RoomEvents.RoomEnded;
 import com.luyou.live.server.live.domain.RoomEvents.RoomStarted;
+import com.luyou.live.server.media.LiveKitTokenIssuer.ObsPublish;
 import com.luyou.live.server.media.TokenIssuer;
 import com.luyou.live.server.user.domain.User;
 import com.luyou.live.server.user.domain.UserRepository;
@@ -53,7 +54,7 @@ public class RoomService {
         roomRepository.save(room);
         LivekitToken token = tokenIssuer.issuePublisher(room.getId(), operatorId);
         eventPublisher.publishEvent(RoomStarted.of(room));
-        return new StartResult(toView(room, anchorNickname(operatorId)), token);
+        return new StartResult(toView(room, anchorNickname(operatorId)), token, safeObs(room.getId()));
     }
 
     /** 直播中补签发布 token（页面刷新后重新推流，不改变房间状态） */
@@ -63,7 +64,21 @@ public class RoomService {
         room.assertAnchor(operatorId);
         if (room.getStatus() != LiveRoom.RoomStatus.LIVING) throw new ApiException(40906, "room not living");
         LivekitToken token = tokenIssuer.issuePublisher(room.getId(), operatorId);
-        return new StartResult(toView(room, anchorNickname(operatorId)), token);
+        return new StartResult(toView(room, anchorNickname(operatorId)), token, safeObs(room.getId()));
+    }
+
+    /** OBS 入口故障不阻断开播（摄像头路径不受影响） */
+    private ObsPublish safeObs(String roomId) {
+        try { return tokenIssuer.ensureObsPublish(roomId); }
+        catch (Exception e) { return null; }
+    }
+
+    /** 主播查询 OBS 推流信息（幂等） */
+    @Transactional(readOnly = true)
+    public ObsPublish obsInfo(String roomId, String operatorId) {
+        LiveRoom room = load(roomId);
+        room.assertAnchor(operatorId);
+        return tokenIssuer.ensureObsPublish(room.getId());
     }
 
     @Transactional
@@ -125,6 +140,6 @@ public class RoomService {
                            String coverUrl, String status, int sessionSeq,
                            String startedAt, String endedAt) {}
 
-    public record StartResult(RoomView room, LivekitToken livekit) {}
+    public record StartResult(RoomView room, LivekitToken livekit, ObsPublish obs) {}
     public record EnterResult(RoomView room, LivekitToken livekit, String nickname) {}
 }

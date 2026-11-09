@@ -13,6 +13,7 @@ export default function ControlPage() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [online, setOnline] = useState(0);
   const [likes, setLikes] = useState(0);
+  const [obs, setObs] = useState<{ url: string; streamKey: string } | null>(null);
   const [err, setErr] = useState('');
   const [publishing, setPublishing] = useState(false);
   const lkRoomRef = useRef<Room | null>(null);
@@ -27,6 +28,7 @@ export default function ControlPage() {
         setOnline(snap.online);
         setLikes(snap.likes);
         setComments(snap.comments);
+        api.obsInfo(roomId).then(setObs).catch(() => {});
       }
     } catch (e: any) { setErr(e.message); }
   }
@@ -66,6 +68,7 @@ export default function ControlPage() {
     try {
       const res = await api.startRoom(roomId);
       setRoom(res.room);
+      if (res.obs) setObs(res.obs);
       await connectAndPublish(res.livekit);
     } catch (e: any) { setErr(e.message); }
   }
@@ -75,6 +78,7 @@ export default function ControlPage() {
     setErr('');
     try {
       const res = await api.republishRoom(roomId);
+      if (res.obs) setObs(res.obs);
       await connectAndPublish(res.livekit);
     } catch (e: any) { setErr(e.message); }
   }
@@ -113,6 +117,20 @@ export default function ControlPage() {
           </div>
         )}
         <div ref={previewRef} className="row" style={{ marginTop: 12, flexWrap: 'wrap' }} />
+        {obs && (
+          <div style={{ marginTop: 14, borderTop: '1px solid #262b3a', paddingTop: 12 }}>
+            <b>OBS 推流</b> <span className="muted">（OBS 设置 → 直播：服务=自定义）</span>
+            <div className="row" style={{ marginTop: 8 }}>
+              <span className="muted" style={{ width: 80 }}>服务器</span>
+              <input readOnly value={obs.url} onFocus={e => e.target.select()} style={{ flex: 1 }} />
+            </div>
+            <div className="row" style={{ marginTop: 8 }}>
+              <span className="muted" style={{ width: 80 }}>串流密钥</span>
+              <input readOnly value={obs.streamKey} onFocus={e => e.target.select()} style={{ flex: 1 }} />
+            </div>
+            <div className="muted" style={{ marginTop: 6 }}>用摄像头开播和 OBS 推流二选一；两边同时推观众会同时看到两路画面。</div>
+          </div>
+        )}
       </div>
       <div className="card">
         <b>评论管理</b> <span className="muted">（点「禁言10分」管理评论用户）</span>
