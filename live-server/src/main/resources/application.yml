@@ -4,9 +4,28 @@ server:
 spring:
   application:
     name: live-server
+  datasource:
+    url: jdbc:mysql://${LIVE_DB_HOST:127.0.0.1}:${LIVE_DB_PORT:13306}/live_platform?useUnicode=true&characterEncoding=UTF-8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+    username: ${LIVE_DB_USER:root}
+    password: ${LIVE_DB_PASSWORD:root}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${LIVE_REDIS_HOST:127.0.0.1}
+      port: ${LIVE_REDIS_PORT:16379}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
 
-# LiveKit Server 连接（本地 compose 见 live-deployment/）
 livekit:
-  url: "ws://localhost:7880"
-  api-key: "devkey"
-  api-secret: "secret"
+  url: ${LIVEKIT_URL:ws://127.0.0.1:7880}
+  api-key: ${LIVEKIT_API_KEY:devkey}
+  api-secret: ${LIVEKIT_API_SECRET:secret}
+
+jwt:
+  secret: ${LIVE_JWT_SECRET:live-platform-dev-secret-0123456789abcdef-change-in-prod}
+  ttl-seconds: 7200
+
+live:
+  cors-origins: ${LIVE_CORS_ORIGINS:http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174}
