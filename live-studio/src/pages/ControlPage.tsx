@@ -15,6 +15,9 @@ export default function ControlPage() {
   const [likes, setLikes] = useState(0);
   const [obs, setObs] = useState<{ protocol: string; url: string; streamKey: string } | null>(null);
   const [obsProto, setObsProto] = useState<'RTMP' | 'WHIP'>('RTMP');
+  /** 推流方式：开播前选择，直播中据此渲染（摄像头=本机推流，RTMP=OBS 推流） */
+  const [mode, setMode] = useState<'WEBRTC' | 'RTMP' | null>(null);
+  const modeKey = `lp_mode_${roomId}`;
   const [err, setErr] = useState('');
   const [publishing, setPublishing] = useState(false);
   const lkRoomRef = useRef<Room | null>(null);
@@ -25,19 +28,22 @@ export default function ControlPage() {
       const r = await api.roomDetail(roomId);
       setRoom(r);
       if (r.status === 'LIVING') {
+        // 刷新恢复：沿用开播时选择的推流方式
+        const saved = sessionStorage.getItem(modeKey);
+        setMode(saved === 'RTMP' ? 'RTMP' : 'WEBRTC');
         const snap = await api.snapshot(roomId);
         setOnline(snap.online);
         setLikes(snap.likes);
         setComments(snap.comments);
-        api.obsInfo(roomId, obsProto).then(setObs).catch(() => {});
+        if (saved === 'RTMP') api.obsInfo(roomId, obsProto).then(setObs).catch(() => setObs(null));
       }
     } catch (e: any) { setErr(e.message); }
   }
   useEffect(() => { load(); }, [roomId]);
-  // 协议切换时重新取推流信息
+  // 协议切换时重新取推流信息（仅 OBS 模式）
   useEffect(() => {
-    if (living) api.obsInfo(roomId, obsProto).then(setObs).catch(() => setObs(null));
-  }, [obsProto]);
+    if (living && mode === 'RTMP') api.obsInfo(roomId, obsProto).then(setObs).catch(() => setObs(null));
+  }, [obsProto, mode]);
 
   // 仅在直播中连接互动 WS：未开播时连了也会被 auth.fail 拒绝
   const living = room?.status === 'LIVING';
@@ -68,13 +74,19 @@ export default function ControlPage() {
     });
   }
 
-  async function start() {
+  /** 选择推流方式后开播：WebRTC=本机摄像头，RTMP=OBS 推流只显示推流地址 */
+  async function start(chosen: 'WEBRTC' | 'RTMP') {
     setErr('');
+    setMode(chosen);
     try {
       const res = await api.startRoom(roomId);
+      sessionStorage.setItem(modeKey, chosen);
       setRoom(res.room);
-      if (res.obs) setObs(res.obs);
-      await connectAndPublish(res.livekit);
+      if (chosen === 'RTMP') {
+        if (res.obs) setObs(res.obs);
+      } else {
+        await connectAndPublish(res.livekit);
+      }
     } catch (e: any) { setErr(e.message); }
   }
 
@@ -109,7 +121,25 @@ export default function ControlPage() {
       {err && <div className="muted" style={{ color: '#f87171' }}>{err}</div>}
       <div className="card">
         {room?.status !== 'LIVING' ? (
-          <button onClick={start} disabled={publishing}>{room?.status === 'ENDED' ? '重新开播（摄像头+麦克风）' : '开播（摄像头+麦克风）'}</button>
+          <div>
+            <div className="muted" style={{ marginBottom: 10 }}>选择推流方式后开播：</div>
+            <div className="row" style={{ gap: 12 }}>
+              <button onClick={() => start('WEBRTC')} disabled={publishing}>
+                {room?.status === 'ENDED' ? '重新开播' : '开播'}（摄像头+麦克风 / WebRTC）
+              </button>
+              <button onClick={() => start('RTMP')}>
+                {room?.status === 'ENDED' ? '重新开播' : '开播'}（OBS 推流 / RTMP）
+              </button>
+            </div>
+            <div className="muted" style={{ marginTop: 8 }}>
+              WebRTC：浏览器直接推摄像头画面；OBS 推流：开播后页面显示服务器与串流密钥，到 OBS 里填。
+            </div>
+          </div>
+        ) : mode === 'RTMP' ? (
+          <div className="row">
+            <span style={{ color: '#4ade80' }}>● 直播中（等待 OBS 推流）</span>
+            <button className="red" onClick={stop}>下播</button>
+          </div>
         ) : publishing ? (
           <div className="row">
             <span style={{ color: '#4ade80' }}>● 推流中</span>
@@ -121,33 +151,38 @@ export default function ControlPage() {
             <button onClick={republish}>重新推流</button>
           </div>
         )}
-        <div ref={previewRef} className="row" style={{ marginTop: 12, flexWrap: 'wrap' }} />
-        {obs && (
-          <div style={{ marginTop: 14, borderTop: '1px solid #262b3a', paddingTop: 12 }}>
-            <b>OBS 推流</b>
-            <label style={{ marginLeft: 16 }}>
-              <input type="radio" name="obsproto" checked={obsProto === 'RTMP'}
-                onChange={() => setObsProto('RTMP')} /> RTMP
-            </label>
-            <label style={{ marginLeft: 12 }}>
-              <input type="radio" name="obsproto" checked={obsProto === 'WHIP'}
-                onChange={() => setObsProto('WHIP')} /> WHIP（OBS 30+ 低延迟）
-            </label>
-            <div className="row" style={{ marginTop: 8 }}>
-              <span className="muted" style={{ width: 80 }}>服务器</span>
-              <input readOnly value={obs.url} onFocus={e => e.target.select()} style={{ flex: 1 }} />
+        {mode !== 'RTMP' && <div ref={previewRef} className="row" style={{ marginTop: 12, flexWrap: 'wrap' }} />}
+        {mode === 'RTMP' && room?.status === 'LIVING' && (
+          obs ? (
+            <div style={{ marginTop: 14, borderTop: '1px solid #262b3a', paddingTop: 12 }}>
+              <b>OBS 推流</b>
+              <label style={{ marginLeft: 16 }}>
+                <input type="radio" name="obsproto" checked={obsProto === 'RTMP'}
+                  onChange={() => setObsProto('RTMP')} /> RTMP
+              </label>
+              <label style={{ marginLeft: 12 }}>
+                <input type="radio" name="obsproto" checked={obsProto === 'WHIP'}
+                  onChange={() => setObsProto('WHIP')} /> WHIP（OBS 30+ 低延迟）
+              </label>
+              <div className="row" style={{ marginTop: 8 }}>
+                <span className="muted" style={{ width: 80 }}>服务器</span>
+                <input readOnly value={obs.url} onFocus={e => e.target.select()} style={{ flex: 1 }} />
+              </div>
+              <div className="row" style={{ marginTop: 8 }}>
+                <span className="muted" style={{ width: 80 }}>{obsProto === 'WHIP' ? 'Bearer 令牌' : '串流密钥'}</span>
+                <input readOnly value={obs.streamKey} onFocus={e => e.target.select()} style={{ flex: 1 }} />
+              </div>
+              <div className="muted" style={{ marginTop: 6 }}>
+                {obsProto === 'WHIP'
+                  ? 'OBS 设置 → 直播：服务类型选「WHIP」，服务器与 Bearer 令牌填上面两项。'
+                  : 'OBS 设置 → 直播：服务选「自定义」，服务器与串流密钥填上面两项。'}
+              </div>
             </div>
-            <div className="row" style={{ marginTop: 8 }}>
-              <span className="muted" style={{ width: 80 }}>{obsProto === 'WHIP' ? 'Bearer 令牌' : '串流密钥'}</span>
-              <input readOnly value={obs.streamKey} onFocus={e => e.target.select()} style={{ flex: 1 }} />
+          ) : (
+            <div className="muted" style={{ marginTop: 12, color: '#fbbf24' }}>
+              推流地址获取失败，刷新页面重试。
             </div>
-            <div className="muted" style={{ marginTop: 6 }}>
-              {obsProto === 'WHIP'
-                ? 'OBS 设置 → 直播：服务类型选「WHIP」，服务器与 Bearer 令牌填上面两项。'
-                : 'OBS 设置 → 直播：服务选「自定义」，服务器与串流密钥填上面两项。'}
-            </div>
-            <div className="muted" style={{ marginTop: 6 }}>用摄像头开播和 OBS 推流二选一；两边同时推观众会同时看到两路画面。</div>
-          </div>
+          )
         )}
       </div>
       <div className="card">
