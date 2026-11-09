@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Room } from 'livekit-client';
-import { api, connectRoomWs, currentUser } from '../api';
+import { api, connectRoomWsAutoReload, currentUser } from '../api';
 import { useAuthGuard } from './useAuthGuard';
 
 interface Comment { commentId: string; userId: string; nickname: string; content: string; }
@@ -26,7 +26,7 @@ export default function ControlPage() {
   const living = room?.status === 'LIVING';
   useEffect(() => {
     if (!living) return;
-    const ws = connectRoomWs(roomId, {
+    const ws = connectRoomWsAutoReload(roomId, {
       onEvent: (type, payload) => {
         if (type === 'auth.ok') setOnline(payload.online);
         if (type === 'comment.new') setComments(cs => [...cs.slice(-199), payload]);

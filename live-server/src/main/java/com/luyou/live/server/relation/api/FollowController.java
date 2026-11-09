@@ -27,6 +27,7 @@ public class FollowController {
 
     @GetMapping("/follow/counts")
     public ApiResponse<FollowService.Counts> counts(@PathVariable String userId) {
-        return ApiResponse.ok(followService.counts(userId));
+        // 可选鉴权：带 token 时返回 viewer 是否已关注
+        return ApiResponse.ok(followService.counts(userId, AuthContext.uid()));
     }
 }

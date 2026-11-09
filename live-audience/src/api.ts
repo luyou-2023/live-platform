@@ -56,3 +56,17 @@ export function connectRoomWs(roomId: string, handlers: WsHandlers): WebSocket {
   ws.onclose = () => handlers.onClose?.();
   return ws;
 }
+
+/** 包装 WS：意外断开（非主动 close）时 1.5s 后刷新页面恢复全量状态 */
+export function connectRoomWsAutoReload(roomId: string, handlers: WsHandlers): WebSocket {
+  let manual = false;
+  const ws = connectRoomWs(roomId, handlers);
+  const origClose = ws.close.bind(ws);
+  ws.close = () => { manual = true; origClose(); };
+  const rawOnClose = ws.onclose;
+  ws.onclose = (ev) => {
+    rawOnClose?.call(ws, ev);
+    if (!manual) setTimeout(() => { if (!manual) location.reload(); }, 1500);
+  };
+  return ws;
+}

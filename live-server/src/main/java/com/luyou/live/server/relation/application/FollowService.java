@@ -56,13 +56,15 @@ public class FollowService {
     }
 
     @Transactional(readOnly = true)
-    public Counts counts(String userId) {
+    public Counts counts(String userId, String viewerId) {
         long followers = longOrZero(redis.opsForValue().get("rm:follower_count:" + userId));
         long following = longOrZero(redis.opsForValue().get("rm:following_count:" + userId));
-        return new Counts(followers, following);
+        boolean followed = viewerId != null
+                && followRepository.findByFollowerIdAndFolloweeId(viewerId, userId).isPresent();
+        return new Counts(followers, following, followed);
     }
 
     private long longOrZero(String v) { return v == null ? 0 : Long.parseLong(v); }
 
-    public record Counts(long followers, long following) {}
+    public record Counts(long followers, long following, boolean followed) {}
 }

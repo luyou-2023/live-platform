@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Room } from 'livekit-client';
-import { api, connectRoomWs } from '../api';
+import { api, connectRoomWsAutoReload } from '../api';
 import { useAuthGuard } from './useAuthGuard';
 
 interface Comment { commentId: string; userId: string; nickname: string; content: string; }
@@ -30,13 +30,14 @@ export default function WatchPage() {
         const res = await api.enter(roomId);
         if (closed) return;
         setRoom(res.room);
+        api.counts(res.room.anchorId).then(c => setFollowing(c.followed)).catch(() => {});
         lk = new Room();
         lk.on('trackSubscribed', (track) => {
           stageRef.current?.appendChild(track.attach());
         });
         await lk.connect(res.livekit.serverUrl, res.livekit.token);
         (window as any).__lkRoom = lk;
-        ws = connectRoomWs(roomId, {
+        ws = connectRoomWsAutoReload(roomId, {
           onEvent: (type, payload) => {
             if (type === 'auth.ok') setOnline(payload.online);
             if (type === 'comment.new') setComments(cs => [...cs.slice(-199), payload]);
