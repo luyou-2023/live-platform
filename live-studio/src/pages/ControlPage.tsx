@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { Room } from 'livekit-client';
+import { Room, RoomEvent } from 'livekit-client';
 import { api, connectRoomWsAutoReload, currentUser } from '../api';
 import { useAuthGuard } from './useAuthGuard';
 
@@ -88,6 +88,18 @@ export default function ControlPage() {
     lkRoomRef.current = lk;
     (window as any).__lkRoom = lk;
     setPublishing(true);
+    // 连接被服务器断开（如同一账号在别处推流）时明确提示
+    lk.on(RoomEvent.Disconnected, (reason: any) => {
+      if (lkRoomRef.current !== lk) return; // 已主动断开/切换
+      lkRoomRef.current = null;
+      setPublishing(false);
+      const r = String(reason ?? '');
+      if (r.includes('DUPLICATE')) {
+        setErr('同一账号在另一个页面或设备上推流，本机已被挤下线。关掉另一个页面后点「重新推流」。');
+      } else {
+        setErr('推流连接已断开，点「重新推流」恢复。');
+      }
+    });
     // 摄像头/麦克风被系统或其他应用（OBS、微信等）抢走时， track 会 ended：明确提示而非无声黑屏
     lk.localParticipant.trackPublications.forEach(pub => {
       pub.track?.mediaStreamTrack?.addEventListener('ended', () => {
