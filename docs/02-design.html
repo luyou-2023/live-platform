@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>02-design - live-platform</title><style>
+  body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+         background: #0f1115; color: #e8e8ec; margin: 0; line-height: 1.7; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { border-bottom: 2px solid #2563eb; padding-bottom: 8px; font-size: 26px; }
+  h2 { margin-top: 40px; font-size: 20px; color: #93c5fd; }
+  h3 { font-size: 16px; color: #bfdbfe; }
+  code { background: #1b1f2a; border-radius: 4px; padding: 2px 6px; font-size: 13px;
+         font-family: "SF Mono", Menlo, monospace; color: #fbbf24; }
+  pre { background: #171a23; border: 1px solid #262b3a; border-radius: 8px;
+        padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; padding: 0; color: #d5dbe7; font-size: 13px; line-height: 1.6; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; display: block; overflow-x: auto; }
+  th, td { border: 1px solid #2b3245; padding: 8px 12px; text-align: left; }
+  th { background: #1b2233; color: #93c5fd; white-space: nowrap; }
+  tr:nth-child(even) td { background: #141824; }
+  img { max-width: 100%; background: #fff; border-radius: 8px; margin: 12px 0;
+        border: 1px solid #262b3a; }
+  blockquote { border-left: 3px solid #2563eb; margin: 12px 0; padding: 4px 16px; color: #9aa3b8; background:#141824; }
+  a { color: #6ea8fe; }
+  .nav { background: #141824; border-bottom: 1px solid #262b3a; padding: 10px 24px;
+         font-size: 13px; position: sticky; top: 0; }
+  .nav a { margin-right: 18px; }
+</style></head>
+<body><div class="nav"><a href="01-structure.html">结构文档</a><a href="02-design.html">设计文档</a><a href="03-implementation.html">实现文档</a></div><div class="wrap"><h1 id="live-platform-ddd">live-platform 设计文档（DDD · 事件驱动）</h1>
+<blockquote>
+<p>版本：v1（第一期） · 2026-11-09 · 配套《结构文档》《实现文档》</p>
+</blockquote>
+<h2 id="1">1. 战术设计总览</h2>
+<p>每个限界上下文内部分四层，包命名固定：</p>
+<pre><code>&lt;context&gt;/
+├── api/            # Controller、WS endpoint、DTO（入站适配器）
+├── application/    # Application Service：编排用例、开事务、发事件
+├── domain/         # 聚合、实体、值对象、领域服务、领域事件、Repository 接口
+└── infrastructure/ # Repository 实现、Redis/LiveKit 适配、事件总线实现
+</code></pre>
+<p>硬性规则：</p>
+<ul>
+<li>domain 层不依赖 Spring 注解之外的技术细节；不 import infrastructure。</li>
+<li>聚合只通过领域方法变更状态；application 层只做编排与事务边界。</li>
+<li>领域事件由聚合/领域服务在状态变更时记录，事务提交后统一派发（AFTER_COMMIT）。</li>
+<li>跨上下文禁止直接调对方 Repository；只允许订阅对方发布的事件或调对方 api。</li>
+</ul>
+<h2 id="2">2. 用户上下文</h2>
+<p><strong>聚合：User</strong>（userId 为根）</p>
+<ul>
+<li>属性：userId、username、passwordHash、nickname、avatarUrl、status（ACTIVE/DISABLED）。</li>
+<li>行为：register()（校验用户名唯一）、rename()、disable()。</li>
+<li>不变量：username 全局唯一，不区分大小写；禁用用户不能登录。</li>
+<li>事件：UserRegistered。</li>
+<li>说明：密码 BCrypt；登录颁发 JWT（HS256，2 小时），WS 首帧鉴权复用同一 JWT。</li>
+</ul>
+<h2 id="3">3. 关系上下文</h2>
+<p><strong>聚合：Follow</strong>（followId 为根，业务唯一键 followerId+followeeId）</p>
+<ul>
+<li>行为：follow()（幂等，重复关注不产生新事件）、unfollow()。</li>
+<li>不变量：不能关注自己；目标用户必须存在且 ACTIVE（由 application 层校验后传入）。</li>
+<li>事件：UserFollowed / UserUnfollowed。</li>
+<li>读模型：粉丝数/关注数走 Redis（事件订阅者维护），不进聚合状态，避免跨聚合引用。</li>
+</ul>
+<h2 id="4">4. 直播上下文</h2>
+<p><strong>聚合：LiveRoom</strong>（roomId 为根）</p>
+<ul>
+<li>属性：roomId、anchorId、title、coverUrl、status、startedAt、endedAt、version（乐观锁）。</li>
+<li>行为：create()、start()、stop()、cancel()。</li>
+<li>状态机：</li>
+</ul>
+<p><img alt="直播间状态机" src="uml/room-lifecycle.svg" /></p>
+<ul>
+<li>不变量：</li>
+<li>start()/stop() 仅 anchorId 本人可调（application 层校验身份 + 聚合内二次断言）。</li>
+<li>同一 anchorId 同时最多一个 LIVING 房间（start 前查存在性，DB 唯一约束兜底：<code>uk_anchor_living</code> 过滤索引）。</li>
+<li>状态迁移只允许 CREATED→LIVING→ENDED、CREATED→ENDED，其他迁移抛领域异常。</li>
+<li>值对象 <strong>LivekitToken</strong>：roomName、identity、token、expiresAt；由 media 域的 TokenIssuer 生成（LiveKit Server SDK，发布者 canPublish=true，订阅者 canPublish=false，2 小时有效）。</li>
+<li>事件：RoomCreated / RoomStarted / RoomEnded。</li>
+</ul>
+<p><strong>进房（观众）</strong>：不走聚合修改，application 校验房间 LIVING 后签发订阅 token 并发布 ViewerJoined。</p>
+<h2 id="5">5. 互动上下文</h2>
+<p><strong>Comment（实体，按房间会话分片）</strong></p>
+<ul>
+<li>属性：commentId、roomId、sessionSeq、userId、nickname 快照、content、sentAt、pinned、blocked。</li>
+<li>行为：post()（长度≤500）、block()、pin()。</li>
+<li>校验链：房间 LIVING → 用户未被禁言（MuteRecord）→ 关键词过滤（BlockedWords 配置）→ 落库 → 发布 CommentPosted。</li>
+<li>事件：CommentPosted（广播 comment.new）、UserMuted（定向 comment.muted）。</li>
+</ul>
+<p><strong>MuteRecord（实体）</strong>：roomId+userId 维度，until 绝对时间；禁言判定在 post 路径同步查 Redis 缓存。</p>
+<p><strong>LikeCounter（领域服务）</strong>：无聚合实体，Redis <code>INCR</code> 原子累加房间总赞数；1 秒窗口聚合 delta 后发布 LikeReceived（广播 like.batch）。设计理由：点赞是高频写、弱一致场景，落聚合只会制造热点行。</p>
+<p><strong>PresenceTracker（领域服务）</strong>：WS 连接建立/断开维护 Redis 房间在线集合（<code>SADD/SREM</code>+过期兜底），5 秒心跳聚合发布 ViewerJoined/ViewerLeft（广播 presence.heartbeat）。</p>
+<h2 id="6">6. 领域事件目录</h2>
+<table>
+<thead>
+<tr>
+<th>事件</th>
+<th>发布者</th>
+<th>关键负载</th>
+<th>订阅者（第一期）</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>UserRegistered</td>
+<td>User</td>
+<td>userId, nickname</td>
+<td>ReadModelUpdater</td>
+</tr>
+<tr>
+<td>UserFollowed / UserUnfollowed</td>
+<td>Follow</td>
+<td>followerId, followeeId</td>
+<td>ReadModelUpdater</td>
+</tr>
+<tr>
+<td>RoomCreated</td>
+<td>LiveRoom</td>
+<td>roomId, anchorId, title</td>
+<td>ReadModelUpdater</td>
+</tr>
+<tr>
+<td>RoomStarted</td>
+<td>LiveRoom</td>
+<td>roomId, startedAt</td>
+<td>InteractionRelay（广播）</td>
+</tr>
+<tr>
+<td>RoomEnded</td>
+<td>LiveRoom</td>
+<td>roomId, endedAt</td>
+<td>InteractionRelay、LivekitJanitor</td>
+</tr>
+<tr>
+<td>CommentPosted</td>
+<td>Comment</td>
+<td>commentId, roomId, userId, content</td>
+<td>InteractionRelay</td>
+</tr>
+<tr>
+<td>LikeReceived</td>
+<td>LikeCounter</td>
+<td>roomId, total, delta</td>
+<td>InteractionRelay</td>
+</tr>
+<tr>
+<td>UserMuted</td>
+<td>MuteRecord</td>
+<td>roomId, userId, until</td>
+<td>InteractionRelay（定向）</td>
+</tr>
+<tr>
+<td>ViewerJoined / ViewerLeft</td>
+<td>PresenceTracker</td>
+<td>roomId, onlineCount</td>
+<td>InteractionRelay、ReadModelUpdater</td>
+</tr>
+</tbody>
+</table>
+<p>事件载体统一 envelope：<code>{eventId, type, occurredAt, payload}</code>；occurredAt 用 UTC；事件不携带可变大对象（如长文本正文限制 500 字内，传输够用）。</p>
+<h2 id="7">7. 事件驱动设计</h2>
+<p><img alt="领域事件流" src="uml/event-flow.svg" /></p>
+<ul>
+<li><strong>事件总线（第一期）</strong>：Spring <code>ApplicationEventPublisher</code> + <code>@TransactionalEventListener(phase = AFTER_COMMIT)</code>。进程内、零基础设施；事件处理器异常不影响主流程（异步线程池，失败重试一次后记日志）。</li>
+<li><strong>事务性保证</strong>：事件在聚合变更的同一事务内记录（内存事件列表随聚合保存），提交后派发；回滚则事件丢弃。无 2PC，无 outbox 表（单实例期进程内即可靠）。</li>
+<li><strong>幂等</strong>：所有事件带 eventId；订阅者处理前查 Redis <code>SETNX event:handled:&lt;id&gt;</code>（24h 过期），防重复广播（如 WS 重连补发场景）。</li>
+<li><strong>时序</strong>：聚合方法内只记录事件 → application 提交事务 → AFTER_COMMIT 派发 → relay 推 WS。</li>
+</ul>
+<h2 id="8">8. 关键时序</h2>
+<p>开播：</p>
+<p><img alt="开播时序" src="uml/seq-start-live.svg" /></p>
+<p>进房与评论：</p>
+<p><img alt="进房与评论时序" src="uml/seq-viewer-interaction.svg" /></p>
+<h2 id="9">9. 非功能性约束</h2>
+<ul>
+<li>一致性：房间状态/评论落库强一致（同库事务）；在线人数/点赞数最终一致（Redis）。</li>
+<li>性能基线（第一期）：单房间 1 万在线弹幕聚合广播延迟 P99 &lt; 1s；进房签发 token P99 &lt; 300ms。</li>
+<li>安全：JWT 签名密钥环境变量注入；LiveKit api-secret 不出现在前端；WS 首帧 5 秒鉴权超时断开。</li>
+</ul></div></body></html>

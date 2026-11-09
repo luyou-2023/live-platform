@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>03-implementation - live-platform</title><style>
+  body { font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+         background: #0f1115; color: #e8e8ec; margin: 0; line-height: 1.7; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 32px 24px 80px; }
+  h1 { border-bottom: 2px solid #2563eb; padding-bottom: 8px; font-size: 26px; }
+  h2 { margin-top: 40px; font-size: 20px; color: #93c5fd; }
+  h3 { font-size: 16px; color: #bfdbfe; }
+  code { background: #1b1f2a; border-radius: 4px; padding: 2px 6px; font-size: 13px;
+         font-family: "SF Mono", Menlo, monospace; color: #fbbf24; }
+  pre { background: #171a23; border: 1px solid #262b3a; border-radius: 8px;
+        padding: 14px 16px; overflow-x: auto; }
+  pre code { background: none; padding: 0; color: #d5dbe7; font-size: 13px; line-height: 1.6; }
+  table { border-collapse: collapse; width: 100%; margin: 16px 0; font-size: 14px; display: block; overflow-x: auto; }
+  th, td { border: 1px solid #2b3245; padding: 8px 12px; text-align: left; }
+  th { background: #1b2233; color: #93c5fd; white-space: nowrap; }
+  tr:nth-child(even) td { background: #141824; }
+  img { max-width: 100%; background: #fff; border-radius: 8px; margin: 12px 0;
+        border: 1px solid #262b3a; }
+  blockquote { border-left: 3px solid #2563eb; margin: 12px 0; padding: 4px 16px; color: #9aa3b8; background:#141824; }
+  a { color: #6ea8fe; }
+  .nav { background: #141824; border-bottom: 1px solid #262b3a; padding: 10px 24px;
+         font-size: 13px; position: sticky; top: 0; }
+  .nav a { margin-right: 18px; }
+</style></head>
+<body><div class="nav"><a href="01-structure.html">结构文档</a><a href="02-design.html">设计文档</a><a href="03-implementation.html">实现文档</a></div><div class="wrap"><h1 id="live-platform">live-platform 实现文档</h1>
+<blockquote>
+<p>版本：v1（第一期） · 2026-11-09 · 配套《结构文档》《设计文档》
+目标读者：写第一行代码前必读；所有代码以本文档为准绳。</p>
+</blockquote>
+<h2 id="1">1. 技术栈与版本基线</h2>
+<table>
+<thead>
+<tr>
+<th>件</th>
+<th>版本</th>
+<th>备注</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>JDK</td>
+<td>17</td>
+<td>语言特性上限：record、sealed、pattern matching 可用</td>
+</tr>
+<tr>
+<td>Spring Boot</td>
+<td>3.3.x</td>
+<td>BOM 由 spring-boot-starter-parent 管</td>
+</tr>
+<tr>
+<td>livekit-server SDK</td>
+<td>0.5.x</td>
+<td>仅 media 域使用</td>
+</tr>
+<tr>
+<td>MySQL</td>
+<td>8.4</td>
+<td>InnoDB，utf8mb4</td>
+</tr>
+<tr>
+<td>Redis</td>
+<td>7.x</td>
+<td>在线集合/计数/幂等/读模型</td>
+</tr>
+<tr>
+<td>Node</td>
+<td>20+</td>
+<td>前端 Vite 构建</td>
+</tr>
+</tbody>
+</table>
+<h2 id="2-live-server">2. live-server 包结构</h2>
+<pre><code>com.luyou.live.server/
+├── common/                  # ApiException、错误码、Page、Json 配置、时钟 Bean
+├── user/
+│   ├── api/                 # UserController（注册/登录）
+│   ├── application/         # UserService
+│   ├── domain/              # User(聚合)、UserRegistered、UserRepository(接口)
+│   └── infrastructure/      # UserJpaRepository(实现)、JwtIssuer
+├── relation/                # 结构同上：Follow 聚合 + 事件
+├── live/
+│   ├── api/                 # RoomController
+│   ├── application/         # RoomService、TokenAppService
+│   ├── domain/              # LiveRoom、RoomStatus、LivekitToken(VO)、Room*事件、LiveRoomRepository
+│   └── infrastructure/      # LiveRoomJpaRepository、LiveKitTokenIssuer、LivekitJanitor(@EventListener)
+├── interaction/
+│   ├── api/                 # InteractionWsEndpoint（/ws/v1/rooms/{roomId}）
+│   ├── application/         # CommentService、MuteService、LikeAppService、PresenceAppService
+│   ├── domain/              # Comment、MuteRecord、LikeCounter、PresenceTracker、Interaction*事件
+│   └── infrastructure/      # WsSessionRegistry、RedisLikeCounter、RedisPresenceTracker、
+│                            # InteractionRelay（事件→WS 广播）、ReadModelUpdater
+└── LiveServerApplication
+</code></pre>
+<p>前端各端 <code>src/api/</code> 只放 live-protocol 的实现客户端，禁止自造协议字段。</p>
+<h2 id="3">3. 关键机制骨架</h2>
+<h3 id="31">3.1 领域事件基类与记录</h3>
+<pre><code class="language-java">public abstract class DomainEvent {
+    private final String eventId = UUID.randomUUID().toString();
+    private final Instant occurredAt = Instant.now();
+    // getter
+}
+
+// 聚合根基类：领域方法内 record()，Repository save 时随聚合带出
+public abstract class AggregateRoot {
+    private final transient List&lt;DomainEvent&gt; domainEvents = new ArrayList&lt;&gt;();
+    protected void record(DomainEvent event) { domainEvents.add(event); }
+    public List&lt;DomainEvent&gt; pullEvents() { var e = List.copyOf(domainEvents); domainEvents.clear(); return e; }
+}
+</code></pre>
+<h3 id="32">3.2 事务性派发</h3>
+<pre><code class="language-java">// Application Service 模板
+@Transactional
+public RoomStartResult start(String roomId, String operatorId) {
+    var room = roomRepository.load(roomId).orElseThrow(() -&gt; new ApiException(40404, &quot;room.not_found&quot;));
+    room.start(operatorId);                    // 聚合内断言身份与状态迁移
+    roomRepository.save(room);                 // 事件随聚合一起落库
+    room.pullEvents().forEach(eventPublisher::publishEvent); // 事务内暂存
+    return ...;
+}
+
+// 订阅者：提交后异步执行
+@Component
+public class InteractionRelay {
+    @Async(&quot;eventExecutor&quot;)
+    @TransactionalEventListener(phase = AFTER_COMMIT)
+    public void on(RoomStarted event) { wsRegistry.broadcast(event.roomId(), &quot;room.started&quot;, event); }
+}
+</code></pre>
+<h3 id="33-livekit-token-media">3.3 LiveKit token 签发（media）</h3>
+<pre><code class="language-java">@Component
+public class LiveKitTokenIssuer implements TokenIssuer {
+    private final AccessToken token = new AccessToken(apiKey, apiSecret);
+    public LivekitToken issuePublisher(String roomName, String identity) {
+        token.setName(identity).setIdentity(identity).setRoomAdmin(true);
+        token.addGrant(new RoomJoin(true), new RoomPublish(true), new RoomSubscribe(true));
+        return new LivekitToken(roomName, identity, token.toJwt(), Instant.now().plus(2, HOURS));
+    }
+}
+</code></pre>
+<h3 id="34-websocket">3.4 WebSocket 端点与首帧鉴权</h3>
+<pre><code class="language-java">@Component
+public class InteractionWsEndpoint extends TextWebSocketHandler {
+    // 连接建立：仅注册会话，标记未鉴权
+    // 首帧必须为 {type:&quot;auth&quot;, payload:{token}}：验 JWT、校验房间存在且 LIVING
+    // 通过：SADD presence:{roomId} -&gt; 发布 ViewerJoined -&gt; 返回 auth.ok
+    // 5 秒未鉴权 / 校验失败：发 auth.fail 并关闭
+    // 之后按协议分发 comment.send / like.send；连接关闭：SREM + 发布 ViewerLeft
+}
+</code></pre>
+<p>广播规则：InteractionRelay 只依赖 <code>WsSessionRegistry</code>（roomId → sessions 映射）；定向消息（comment.muted）按 userId 索引会话。</p>
+<h3 id="35-redis-key">3.5 Redis key 规范</h3>
+<table>
+<thead>
+<tr>
+<th>key</th>
+<th>类型</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>presence:{roomId}</code></td>
+<td>set</td>
+<td>在线 userId 集合，成员带 TTL 兜底</td>
+</tr>
+<tr>
+<td><code>like:total:{roomId}</code></td>
+<td>string</td>
+<td>房间累计赞数（INCR）</td>
+</tr>
+<tr>
+<td><code>like:window:{roomId}</code></td>
+<td>string</td>
+<td>1 秒聚合窗口 delta</td>
+</tr>
+<tr>
+<td><code>muted:{roomId}:{userId}</code></td>
+<td>string</td>
+<td>禁言截止戳</td>
+</tr>
+<tr>
+<td><code>event:handled:{eventId}</code></td>
+<td>string</td>
+<td>订阅者幂等标记，24h</td>
+</tr>
+<tr>
+<td><code>rm:follower_count:{userId}</code></td>
+<td>string</td>
+<td>粉丝数读模型</td>
+</tr>
+<tr>
+<td><code>rm:live_list</code></td>
+<td>zset</td>
+<td>直播列表读模型（score=startedAt）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="36-mysql">3.6 MySQL 表草案（核心列）</h3>
+<ul>
+<li><code>lp_user</code>(id, username_uk, password_hash, nickname, avatar_url, status, created_at)</li>
+<li><code>lp_follow</code>(id, follower_id, followee_id, created_at, uk(follower_id, followee_id))</li>
+<li><code>lp_live_room</code>(id, anchor_id, title, cover_url, status, session_seq, started_at, ended_at, version)</li>
+<li>部分唯一索引：<code>(anchor_id, status)</code> 过滤 <code>status='LIVING'</code>，保证单主播单直播间</li>
+<li><code>lp_comment</code>(id, room_id, session_seq, user_id, nickname, content, sent_at, pinned, blocked)</li>
+<li><code>lp_mute</code>(id, room_id, user_id, until, created_at)</li>
+<li><code>lp_domain_event</code>(id, type, payload_json, occurred_at) — 审计/排查用，非 outbox</li>
+</ul>
+<h2 id="4-api">4. API ↔ 协议 ↔ 实现映射</h2>
+<table>
+<thead>
+<tr>
+<th>协议（live-protocol）</th>
+<th>Controller</th>
+<th>Application</th>
+<th>Repository/适配</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1.1 注册</td>
+<td>UserController</td>
+<td>UserService.register</td>
+<td>UserRepository</td>
+</tr>
+<tr>
+<td>1.2 登录</td>
+<td>UserController</td>
+<td>UserService.login</td>
+<td>UserRepository + JwtIssuer</td>
+</tr>
+<tr>
+<td>2.1 创建房间</td>
+<td>RoomController</td>
+<td>RoomService.create</td>
+<td>LiveRoomRepository</td>
+</tr>
+<tr>
+<td>2.2 开播</td>
+<td>RoomController</td>
+<td>RoomService.start</td>
+<td>LiveRoomRepository + TokenIssuer</td>
+</tr>
+<tr>
+<td>2.3 下播</td>
+<td>RoomController</td>
+<td>RoomService.stop</td>
+<td>LiveRoomRepository</td>
+</tr>
+<tr>
+<td>2.4 直播列表</td>
+<td>RoomController</td>
+<td>RoomQueryService</td>
+<td>rm:live_list 读模型</td>
+</tr>
+<tr>
+<td>2.5 进房</td>
+<td>RoomController</td>
+<td>RoomService.enter</td>
+<td>LiveRoomRepository + TokenIssuer + PresenceTracker</td>
+</tr>
+<tr>
+<td>3.1 关注/取关</td>
+<td>FollowController</td>
+<td>FollowService</td>
+<td>FollowRepository</td>
+</tr>
+<tr>
+<td>4.x WS 互动</td>
+<td>InteractionWsEndpoint</td>
+<td>CommentService / LikeAppService / PresenceAppService</td>
+<td>Redis 适配器 + InteractionRelay</td>
+</tr>
+</tbody>
+</table>
+<h2 id="5">5. 编码规约</h2>
+<ul>
+<li>ID：对外全用 String（UUID/ULID），DB 内部 bigint 自增；禁止把 DB 自增 id 直接暴露给前端。</li>
+<li>时间：全链路 UTC Instant，前端自行转本地时区。</li>
+<li>错误：抛 <code>ApiException(code, message)</code>，全局 <code>@RestControllerAdvice</code> 转协议错误信封；禁止在 controller 返回裸异常信息。</li>
+<li>事务：只在 application 层开 <code>@Transactional</code>；controller 与事件监听不直接写库（监听可用 REQUIRES_NEW 做读模型）。</li>
+<li>日志：结构化关键字段（roomId/userId/eventId），严禁打印 token/密码/JWT。</li>
+<li>配置：所有密钥走环境变量；application.yml 只放默认值与本地开发值。</li>
+</ul>
+<h2 id="6">6. 测试策略</h2>
+<table>
+<thead>
+<tr>
+<th>层</th>
+<th>手段</th>
+<th>覆盖目标</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>聚合/领域服务</td>
+<td>纯 JUnit（无 Spring）</td>
+<td>状态机迁移、不变量、事件记录</td>
+</tr>
+<tr>
+<td>application</td>
+<td>@SpringBootTest + H2/Testcontainers MySQL</td>
+<td>事务边界、事件派发、幂等</td>
+</tr>
+<tr>
+<td>api</td>
+<td>@WebMvcTest / WS 集成测试</td>
+<td>协议字段、错误码、鉴权</td>
+</tr>
+<tr>
+<td>契约</td>
+<td>live-protocol 为准的人工评审 + 前端联调清单</td>
+<td>双端一致</td>
+</tr>
+</tbody>
+</table>
+<p>LiveKit 相关在测试中全部走 <code>TokenIssuer</code> 接口 mock；Redis 用 Testcontainers。</p>
+<h2 id="7">7. 演进路线（现在不做，预留接口）</h2>
+<ol>
+<li>多实例部署：事件总线抽象为 <code>EventBus</code> 接口，进程内实现替换为 Redis Stream 实现；WS 广播改 Redis pub/sub + 本实例会话映射。</li>
+<li>直播列表/粉丝数等读模型独立成查询侧（CQRS 拆分），现在 <code>rm:</code> key 即为预留。</li>
+<li>回放/录制：LiveKit Egress 接入 media 域，协议升 v2。</li>
+<li>礼物/连麦/PK：新增限界上下文（Gift、CoHost），禁止塞进互动上下文。</li>
+</ol>
+<h2 id="8">8. 落地顺序（建议）</h2>
+<ol>
+<li>user 上下文（注册/登录/JWT）→ 2. live 上下文建房/开播/下播 + TokenIssuer → 3. 前端两端拉通直播链路（LiveKit JS SDK）→ 4. interaction 上下文 WS + 评论 → 5. 点赞/在线/关注/禁言 → 6. 读模型与列表优化。</li>
+</ol></div></body></html>
