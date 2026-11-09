@@ -31,6 +31,11 @@ export default function WatchPage() {
         if (closed) return;
         setRoom(res.room);
         api.counts(res.room.anchorId).then(c => setFollowing(c.followed)).catch(() => {});
+        const snap = await api.snapshot(roomId);
+        if (closed) return;
+        setOnline(snap.online);
+        setLikes(snap.likes);
+        setComments(snap.comments);
         lk = new Room();
         lk.on('trackSubscribed', (track) => {
           stageRef.current?.appendChild(track.attach());

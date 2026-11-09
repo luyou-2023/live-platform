@@ -34,6 +34,7 @@ export const api = {
   roomDetail: (roomId: string) => req('GET', `/api/v1/rooms/${roomId}`),
   mute: (roomId: string, userId: string, minutes: number) => req('POST', `/api/v1/rooms/${roomId}/mute`, { userId, minutes }),
   liveList: () => req('GET', '/api/v1/rooms/live'),
+  snapshot: (roomId: string) => req('GET', `/api/v1/rooms/${roomId}/snapshot`),
   enter: (roomId: string) => req('POST', `/api/v1/rooms/${roomId}/enter`),
   follow: (userId: string) => req('POST', `/api/v1/users/${userId}/follow`),
   unfollow: (userId: string) => req('DELETE', `/api/v1/users/${userId}/follow`),

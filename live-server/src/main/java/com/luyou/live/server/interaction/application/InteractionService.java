@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
+import java.util.List;
 import java.time.Instant;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -84,6 +85,22 @@ public class InteractionService {
         long online = redis.opsForSet().size("presence:" + roomId);
         eventPublisher.publishEvent(ViewerLeft.of(roomId, userId, online));
     }
+
+    @Transactional(readOnly = true)
+    public RoomSnapshot snapshot(String roomId) {
+        LiveRoom room = roomRepository.findById(roomId)
+                .orElseThrow(() -> new ApiException(40404, "room not found"));
+        String likesStr = redis.opsForValue().get("like:total:" + roomId);
+        long likes = likesStr == null ? 0 : Long.parseLong(likesStr);
+        List<CommentView> comments = commentRepository
+                .findTop50ByRoomIdAndSessionSeqAndBlockedFalseOrderBySentAtDesc(
+                        roomId, room.getSessionSeq())
+                .stream().sorted((a, b) -> a.getSentAt().compareTo(b.getSentAt()))
+                .map(this::toView).toList();
+        return new RoomSnapshot(onlineCount(roomId), likes, comments);
+    }
+
+    public record RoomSnapshot(long online, long likes, List<CommentView> comments) {}
 
     public long onlineCount(String roomId) {
         Long n = redis.opsForSet().size("presence:" + roomId);

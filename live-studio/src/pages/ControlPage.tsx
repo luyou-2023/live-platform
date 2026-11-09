@@ -18,7 +18,15 @@ export default function ControlPage() {
   const previewRef = useRef<HTMLDivElement>(null);
 
   async function load() {
-    try { setRoom(await api.roomDetail(roomId)); } catch (e: any) { setErr(e.message); }
+    try {
+      const r = await api.roomDetail(roomId);
+      setRoom(r);
+      if (r.status === 'LIVING') {
+        const snap = await api.snapshot(roomId);
+        setOnline(snap.online);
+        setComments(snap.comments);
+      }
+    } catch (e: any) { setErr(e.message); }
   }
   useEffect(() => { load(); }, [roomId]);
 
