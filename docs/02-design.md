@@ -53,7 +53,8 @@
 - 不变量：
   - start()/stop() 仅 anchorId 本人可调（application 层校验身份 + 聚合内二次断言）。
   - 同一 anchorId 同时最多一个 LIVING 房间（start 前查存在性，DB 唯一约束兜底：`uk_anchor_living` 过滤索引）。
-  - 状态迁移只允许 CREATED→LIVING→ENDED、CREATED→ENDED，其他迁移抛领域异常。
+  - 状态迁移：CREATED→LIVING→ENDED、CREATED→ENDED；ENDED→LIVING 为「再次开播」（新场次 sessionSeq+1）；LIVING 重复开播抛领域异常。
+  - 再次开播原因：直播是高频重复行为（同一主播每天多场），房间作为主播的固定空间不应一次性。
 - 值对象 **LivekitToken**：roomName、identity、token、expiresAt；由 media 域的 TokenIssuer 生成（LiveKit Server SDK，发布者 canPublish=true，订阅者 canPublish=false，2 小时有效）。
 - 事件：RoomCreated / RoomStarted / RoomEnded。
 

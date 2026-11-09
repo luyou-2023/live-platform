@@ -76,7 +76,7 @@ export default function ControlPage() {
       {err && <div className="muted" style={{ color: '#f87171' }}>{err}</div>}
       <div className="card">
         {room?.status !== 'LIVING' ? (
-          <button onClick={start} disabled={publishing}>开播（摄像头+麦克风）</button>
+          <button onClick={start} disabled={publishing}>{room?.status === 'ENDED' ? '重新开播（摄像头+麦克风）' : '开播（摄像头+麦克风）'}</button>
         ) : (
           <div className="row">
             <span style={{ color: '#4ade80' }}>● 推流中</span>

@@ -53,10 +53,12 @@ public class LiveRoom {
     }
 
     public void start() {
-        if (status != RoomStatus.CREATED) throw new ApiException(40903, "room not in creatable state");
+        if (status == RoomStatus.LIVING) throw new ApiException(40903, "room already living");
+        // 已结束的房间允许再次开播（新场次 sessionSeq+1）
         status = RoomStatus.LIVING;
         sessionSeq += 1;
         startedAt = Instant.now();
+        endedAt = null;
     }
 
     public void stop() {

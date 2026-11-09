@@ -6,6 +6,7 @@ title 直播间状态机
 CREATED --> LIVING : start() / 仅主播
 LIVING --> ENDED : stop() / 主播或系统
 CREATED --> ENDED : cancel
+ENDED --> LIVING : restart()\n仅主播
 ENDED --> [*]
 
 note right of CREATED : 未推流不可见
