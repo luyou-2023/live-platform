@@ -1,0 +1,90 @@
+@startuml
+!theme plain
+title 领域模型与聚合（第一期）
+
+package "用户上下文" {
+  class User <<聚合根>> {
+    +userId: String
+    +username: String
+    +nickname: String
+    +status: UserStatus
+  }
+  enum UserStatus {
+    ACTIVE
+    DISABLED
+  }
+  class UserRegistered <<领域事件>> #lightblue
+}
+package "关系上下文" {
+  class Follow <<聚合根>> {
+    +followId: String
+    +followerId: String
+    +followeeId: String
+    +followedAt: Instant
+  }
+  class UserFollowed <<领域事件>> #lightblue
+  class UserUnfollowed <<领域事件>> #lightblue
+}
+package "直播上下文" {
+  class LiveRoom <<聚合根>> {
+    +roomId: String
+    +anchorId: String
+    +title: String
+    +coverUrl: String
+    +status: RoomStatus
+    +start(): void
+    +stop(): void
+  }
+  enum RoomStatus {
+    CREATED
+    LIVING
+    ENDED
+  }
+  class LivekitToken <<值对象>> #lightyellow
+  class RoomCreated <<领域事件>> #lightblue
+  class RoomStarted <<领域事件>> #lightblue
+  class RoomEnded <<领域事件>> #lightblue
+}
+package "互动上下文" {
+  class Comment <<实体>> {
+    +commentId: String
+    +roomId: String
+    +userId: String
+    +content: String
+    +sentAt: Instant
+    +blocked: boolean
+  }
+  class MuteRecord <<实体>> {
+    +roomId: String
+    +userId: String
+    +until: Instant
+  }
+  class LikeCounter <<领域服务>> #lightyellow
+  class PresenceTracker <<领域服务>> #lightyellow
+  class CommentPosted <<领域事件>> #lightblue
+  class LikeReceived <<领域事件>> #lightblue
+  class UserMuted <<领域事件>> #lightblue
+  class ViewerJoined <<领域事件>> #lightblue
+  class ViewerLeft <<领域事件>> #lightblue
+}
+
+User --> UserRegistered : 发布
+Follow --> UserFollowed : 发布
+Follow --> UserUnfollowed : 发布
+LiveRoom --> RoomCreated : 发布
+LiveRoom --> RoomStarted : 发布
+LiveRoom --> RoomEnded : 发布
+LiveRoom --> LivekitToken : 生成
+Comment --> CommentPosted : 发布
+LikeCounter --> LikeReceived : 发布
+PresenceTracker --> ViewerJoined : 发布
+PresenceTracker --> ViewerLeft : 发布
+MuteRecord --> UserMuted : 发布
+
+note bottom of LiveRoom
+  不变量：仅主播本人可开关播
+  不变量：同时只有一个直播中房间
+end note
+note bottom of LikeCounter : Redis 原子自增+聚合心跳
+note bottom of PresenceTracker : Redis 房间集合+过期
+@enduml

@@ -1,5 +1,7 @@
 # 架构设计（第一期）
 
+> 正式文档三件套：01-structure.md（结构）· 02-design.md（DDD 设计）· 03-implementation.md（实现）。
+
 ## 总则
 
 - 本产品线完全独立，不复用 LiveShop 任何代码、服务与数据。

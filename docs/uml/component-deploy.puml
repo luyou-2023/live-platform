@@ -1,0 +1,29 @@
+@startuml
+!theme plain
+title 部署视图（第一期）
+
+node "浏览器" {
+  component "live-studio\n主播端" as studio
+  component "live-audience\n观众端" as audience
+}
+node "服务端" {
+  component "nginx\nAPI Gateway" as gw
+  component "live-server\nSpring Boot" as server
+  component "LiveKit Server\nSFU 媒体面" as lk
+  database "MySQL 8" as mysql
+  database "Redis 7" as redis
+}
+studio --> gw : HTTPS
+audience --> gw : HTTPS
+gw --> server : 转发
+server --> mysql : JDBC
+server --> redis : RESP
+studio --> lk : WebRTC 发布
+audience --> lk : WebRTC 订阅
+server --> lk : 控制 API
+
+note right of server
+  事件总线：进程内
+  多实例演进 Redis Stream
+end note
+@enduml

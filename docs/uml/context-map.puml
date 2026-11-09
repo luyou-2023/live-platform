@@ -1,0 +1,38 @@
+@startuml
+!theme plain
+title live-platform 上下文映射（第一期）
+
+actor "主播" as anchor
+actor "观众" as viewer
+
+package "用户上下文" as userCtx {
+  component "User\n注册登录资料" as userBC
+}
+package "直播上下文" as liveCtx {
+  component "LiveRoom\n建房开播下播" as roomBC
+}
+package "关系上下文" as relationCtx {
+  component "Follow\n关注取关" as followBC
+}
+package "互动上下文" as interactionCtx {
+  component "互动服务\n评论点赞在线" as interactionBC
+}
+
+component "LiveKit\nSFU 媒体面" as livekit
+database "MySQL" as mysql
+database "Redis" as redis
+
+anchor --> userCtx : 注册/登录
+anchor --> roomBC : 开播/下播
+viewer --> followBC : 关注主播
+viewer --> interactionBC : 评论/点赞
+roomBC --> livekit : 签发 token
+userCtx --> mysql
+liveCtx --> mysql
+relationCtx --> mysql
+interactionCtx --> mysql
+interactionCtx --> redis
+
+note right of roomBC : 同一主播仅一个直播中房间
+note right of interactionBC : 在线/点赞走 Redis
+@enduml

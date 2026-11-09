@@ -1,0 +1,14 @@
+@startuml
+!theme plain
+title 直播间状态机
+
+[*] --> CREATED : 创建房间
+CREATED --> LIVING : start() / 仅主播
+LIVING --> ENDED : stop() / 主播或系统
+CREATED --> ENDED : cancel
+ENDED --> [*]
+
+note right of CREATED : 未推流不可见
+note right of LIVING : 可进房互动
+note right of ENDED : 保留评论记录
+@enduml

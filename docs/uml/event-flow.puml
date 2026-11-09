@@ -1,0 +1,39 @@
+@startuml
+!theme plain
+allowmixing
+title 领域事件流（事件驱动）
+
+package "直播上下文" {
+  class RoomCreated
+  class RoomStarted
+  class RoomEnded
+}
+package "互动上下文" {
+  class CommentPosted
+  class LikeReceived
+  class ViewerJoined
+  class ViewerLeft
+  class UserMuted
+}
+package "关系上下文" {
+  class UserFollowed
+}
+package "事件处理器" {
+  component "InteractionRelay\nWS 房间广播" as relay
+  component "ReadModelUpdater\n计数与列表缓存" as readmodel
+  component "LivekitJanitor\n媒体面清理" as janitor
+}
+
+RoomStarted --> relay : 广播 room.started
+RoomEnded --> relay : 广播 room.ended
+RoomEnded --> janitor : 关闭媒体房间
+CommentPosted --> relay : 广播 comment.new
+LikeReceived --> relay : 聚合 like.batch
+ViewerJoined --> readmodel : 在线人数
+ViewerLeft --> readmodel : 在线人数
+UserFollowed --> readmodel : 粉丝数缓存
+RoomCreated --> readmodel : 直播列表缓存
+
+note bottom of relay : 事务提交后广播
+note bottom of readmodel : Redis 读模型
+@enduml

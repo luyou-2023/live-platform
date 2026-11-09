@@ -1,0 +1,21 @@
+@startuml
+!theme plain
+title 进房与评论互动时序（观众）
+
+actor "观众(Audience)" as audience
+participant "live-server" as server
+database "Redis" as redis
+database "MySQL" as db
+
+audience -> server : GET /rooms/{id}
+server -> server : 校验房间为 LIVING
+server ->> audience : 返回 LiveKit 订阅 token
+audience -> server : WS 连接+首帧鉴权
+server -> redis : 在线集合加入
+server ->> audience : presence 心跳
+audience -> server : comment.send
+server -> server : 禁言/关键词校验
+server -> db : 评论落库
+server -> server : 发布 CommentPosted 事件
+server ->> audience : WS 广播 comment.new
+@enduml

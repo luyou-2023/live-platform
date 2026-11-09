@@ -1,0 +1,21 @@
+@startuml
+!theme plain
+title 开播时序（主播）
+
+actor "主播(Studio)" as studio
+participant "live-server" as server
+participant "LiveKit" as lk
+database "MySQL" as db
+database "Redis" as redis
+
+studio -> server : POST /rooms/{id}/start
+server -> server : 校验主播身份与状态
+server -> lk : 创建房间+签发发布 token
+server -> db : 状态置为 LIVING
+server -> redis : 初始化在线集合
+server -> server : 发布 RoomStarted 事件
+server --> studio : 返回 token+房间信息
+server ->> studio : WS 广播 room.started
+
+note over server : 事件在事务提交后派发
+@enduml
