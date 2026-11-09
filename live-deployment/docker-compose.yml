@@ -18,13 +18,13 @@ services:
 
   livekit:
     image: livekit/livekit-server:latest
-    command: --dev --bind 0.0.0.0
+    command: --config /etc/livekit/livekit.yaml --dev
     ports:
-      - "7880:7880"     # HTTP API
-      - "7881:7881"     # WebSocket
-      - "50000-50100:50000-50100/udp"   # WebRTC 媒体
-    environment:
-      LIVEKIT_KEYS: "devkey: secret"
+      - "7880:7880"     # HTTP API / 信令
+      - "7881:7881"     # WebSocket 备用信令
+      - "7882:7882/udp" # WebRTC 媒体（rtc.node_ip=127.0.0.1）
+    volumes:
+      - ./livekit.yaml:/etc/livekit/livekit.yaml
 
 volumes:
   mysql-data:

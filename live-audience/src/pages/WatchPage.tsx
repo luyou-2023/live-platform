@@ -35,6 +35,7 @@ export default function WatchPage() {
           stageRef.current?.appendChild(track.attach());
         });
         await lk.connect(res.livekit.serverUrl, res.livekit.token);
+        (window as any).__lkRoom = lk;
         ws = connectRoomWs(roomId, {
           onEvent: (type, payload) => {
             if (type === 'auth.ok') setOnline(payload.online);

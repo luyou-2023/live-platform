@@ -22,17 +22,20 @@ export default function ControlPage() {
   }
   useEffect(() => { load(); }, [roomId]);
 
+  // 仅在直播中连接互动 WS：未开播时连了也会被 auth.fail 拒绝
+  const living = room?.status === 'LIVING';
   useEffect(() => {
+    if (!living) return;
     const ws = connectRoomWs(roomId, {
       onEvent: (type, payload) => {
         if (type === 'auth.ok') setOnline(payload.online);
         if (type === 'comment.new') setComments(cs => [...cs.slice(-199), payload]);
         if (type === 'presence.heartbeat') setOnline(payload.online);
-        if (type === 'like.batch') { /* 主播侧不显示点赞总数，可扩展 */ }
+        if (type === 'room.ended') setRoom((r: any) => r ? { ...r, status: 'ENDED' } : r);
       },
     });
     return () => ws.close();
-  }, [roomId]);
+  }, [roomId, living]);
 
   async function start() {
     setErr('');
@@ -43,6 +46,7 @@ export default function ControlPage() {
       await lk.connect(res.livekit.serverUrl, res.livekit.token);
       await lk.localParticipant.enableCameraAndMicrophone();
       lkRoomRef.current = lk;
+      (window as any).__lkRoom = lk;
       setPublishing(true);
       lk.localParticipant.videoTrackPublications.forEach(pub => {
         const el = pub.videoTrack?.attach();
