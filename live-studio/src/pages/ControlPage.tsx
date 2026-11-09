@@ -67,6 +67,12 @@ export default function ControlPage() {
   }, [roomId, living]);
 
   async function connectAndPublish(livekit: any) {
+    // 关键：先断开旧连接。重复点「重新推流」不断开的话，
+    // 同身份新连接会把旧连接踢下线（观众黑屏），且旧连接还占着摄像头导致新连接取流失败
+    if (lkRoomRef.current) {
+      lkRoomRef.current.disconnect();
+      lkRoomRef.current = null;
+    }
     const lk = new Room();
     try {
       await lk.connect(livekit.serverUrl, livekit.token);
