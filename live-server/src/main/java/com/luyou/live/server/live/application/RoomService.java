@@ -8,6 +8,7 @@ import com.luyou.live.server.live.domain.RoomEvents.RoomCreated;
 import com.luyou.live.server.live.domain.RoomEvents.RoomEnded;
 import com.luyou.live.server.live.domain.RoomEvents.RoomStarted;
 import com.luyou.live.server.media.LiveKitTokenIssuer.ObsPublish;
+import com.luyou.live.server.media.ObsProtocol;
 import com.luyou.live.server.media.TokenIssuer;
 import com.luyou.live.server.user.domain.User;
 import com.luyou.live.server.user.domain.UserRepository;
@@ -69,16 +70,16 @@ public class RoomService {
 
     /** OBS 入口故障不阻断开播（摄像头路径不受影响） */
     private ObsPublish safeObs(String roomId) {
-        try { return tokenIssuer.ensureObsPublish(roomId); }
+        try { return tokenIssuer.ensureObsPublish(roomId, ObsProtocol.RTMP); }
         catch (Exception e) { return null; }
     }
 
-    /** 主播查询 OBS 推流信息（幂等） */
+    /** 主播查询 OBS 推流信息（幂等），protocol: RTMP（默认）| WHIP */
     @Transactional(readOnly = true)
-    public ObsPublish obsInfo(String roomId, String operatorId) {
+    public ObsPublish obsInfo(String roomId, String operatorId, ObsProtocol protocol) {
         LiveRoom room = load(roomId);
         room.assertAnchor(operatorId);
-        return tokenIssuer.ensureObsPublish(room.getId());
+        return tokenIssuer.ensureObsPublish(room.getId(), protocol);
     }
 
     @Transactional

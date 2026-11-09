@@ -7,6 +7,7 @@ import com.luyou.live.server.live.application.RoomService.EnterResult;
 import com.luyou.live.server.live.application.RoomService.RoomView;
 import com.luyou.live.server.live.application.RoomService.StartResult;
 import com.luyou.live.server.media.LiveKitTokenIssuer.ObsPublish;
+import com.luyou.live.server.media.ObsProtocol;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import org.springframework.validation.annotation.Validated;
@@ -37,8 +38,10 @@ public class RoomController {
     }
 
     @GetMapping("/{roomId}/obs")
-    public ApiResponse<ObsPublish> obs(@PathVariable String roomId) {
-        return ApiResponse.ok(roomService.obsInfo(roomId, AuthContext.requireUid()));
+    public ApiResponse<ObsPublish> obs(@PathVariable String roomId,
+                                       @RequestParam(defaultValue = "RTMP") String protocol) {
+        return ApiResponse.ok(roomService.obsInfo(roomId, AuthContext.requireUid(),
+                ObsProtocol.parse(protocol)));
     }
 
     @PostMapping("/{roomId}/republish")

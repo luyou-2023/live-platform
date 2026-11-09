@@ -34,6 +34,7 @@ services:
     command: --config /etc/livekit-ingress/ingress.yaml
     ports:
       - "19350:1935"    # RTMP（宿主 1935 被本机其他进程占用，映射到 19350）
+      - "8088:8088"     # WHIP（OBS WebRTC 推流）
     volumes:
       - ./ingress.yaml:/etc/livekit-ingress/ingress.yaml
     environment:

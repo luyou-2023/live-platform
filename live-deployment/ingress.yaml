@@ -8,6 +8,7 @@ api_key: devkey
 api_secret: secret
 
 rtmp_port: 1935
+whip_port: 8088
 http_relay_port: 9090
 rtc_port: 9091
 prometheus_port: 9999

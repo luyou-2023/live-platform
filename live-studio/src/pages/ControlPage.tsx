@@ -13,7 +13,8 @@ export default function ControlPage() {
   const [comments, setComments] = useState<Comment[]>([]);
   const [online, setOnline] = useState(0);
   const [likes, setLikes] = useState(0);
-  const [obs, setObs] = useState<{ url: string; streamKey: string } | null>(null);
+  const [obs, setObs] = useState<{ protocol: string; url: string; streamKey: string } | null>(null);
+  const [obsProto, setObsProto] = useState<'RTMP' | 'WHIP'>('RTMP');
   const [err, setErr] = useState('');
   const [publishing, setPublishing] = useState(false);
   const lkRoomRef = useRef<Room | null>(null);
@@ -28,11 +29,15 @@ export default function ControlPage() {
         setOnline(snap.online);
         setLikes(snap.likes);
         setComments(snap.comments);
-        api.obsInfo(roomId).then(setObs).catch(() => {});
+        api.obsInfo(roomId, obsProto).then(setObs).catch(() => {});
       }
     } catch (e: any) { setErr(e.message); }
   }
   useEffect(() => { load(); }, [roomId]);
+  // 协议切换时重新取推流信息
+  useEffect(() => {
+    if (living) api.obsInfo(roomId, obsProto).then(setObs).catch(() => setObs(null));
+  }, [obsProto]);
 
   // 仅在直播中连接互动 WS：未开播时连了也会被 auth.fail 拒绝
   const living = room?.status === 'LIVING';
@@ -119,14 +124,27 @@ export default function ControlPage() {
         <div ref={previewRef} className="row" style={{ marginTop: 12, flexWrap: 'wrap' }} />
         {obs && (
           <div style={{ marginTop: 14, borderTop: '1px solid #262b3a', paddingTop: 12 }}>
-            <b>OBS 推流</b> <span className="muted">（OBS 设置 → 直播：服务=自定义）</span>
+            <b>OBS 推流</b>
+            <label style={{ marginLeft: 16 }}>
+              <input type="radio" name="obsproto" checked={obsProto === 'RTMP'}
+                onChange={() => setObsProto('RTMP')} /> RTMP
+            </label>
+            <label style={{ marginLeft: 12 }}>
+              <input type="radio" name="obsproto" checked={obsProto === 'WHIP'}
+                onChange={() => setObsProto('WHIP')} /> WHIP（OBS 30+ 低延迟）
+            </label>
             <div className="row" style={{ marginTop: 8 }}>
               <span className="muted" style={{ width: 80 }}>服务器</span>
               <input readOnly value={obs.url} onFocus={e => e.target.select()} style={{ flex: 1 }} />
             </div>
             <div className="row" style={{ marginTop: 8 }}>
-              <span className="muted" style={{ width: 80 }}>串流密钥</span>
+              <span className="muted" style={{ width: 80 }}>{obsProto === 'WHIP' ? 'Bearer 令牌' : '串流密钥'}</span>
               <input readOnly value={obs.streamKey} onFocus={e => e.target.select()} style={{ flex: 1 }} />
+            </div>
+            <div className="muted" style={{ marginTop: 6 }}>
+              {obsProto === 'WHIP'
+                ? 'OBS 设置 → 直播：服务类型选「WHIP」，服务器与 Bearer 令牌填上面两项。'
+                : 'OBS 设置 → 直播：服务选「自定义」，服务器与串流密钥填上面两项。'}
             </div>
             <div className="muted" style={{ marginTop: 6 }}>用摄像头开播和 OBS 推流二选一；两边同时推观众会同时看到两路画面。</div>
           </div>

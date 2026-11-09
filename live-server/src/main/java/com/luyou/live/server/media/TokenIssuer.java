@@ -10,6 +10,6 @@ public interface TokenIssuer {
     LivekitToken issueSubscriber(String roomName, String identity);
     /** 关闭媒体房间 */
     void closeRoom(String roomName);
-    /** 为房间确保 RTMP 入口（OBS 推流），幂等 */
-    ObsPublish ensureObsPublish(String roomName);
+    /** 为房间确保 OBS 推流入口（幂等，按协议各建一个） */
+    ObsPublish ensureObsPublish(String roomName, ObsProtocol protocol);
 }

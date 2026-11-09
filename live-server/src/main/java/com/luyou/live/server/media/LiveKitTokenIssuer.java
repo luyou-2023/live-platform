@@ -58,7 +58,8 @@ public class LiveKitTokenIssuer implements TokenIssuer {
     }
 
     @Override
-    public ObsPublish ensureObsPublish(String roomName) {
+    public ObsPublish ensureObsPublish(String roomName, ObsProtocol protocol) {
+        String ingressName = protocol == ObsProtocol.WHIP ? "obs-" + roomName + "-whip" : "obs-" + roomName;
         try {
             List<LivekitIngress.IngressInfo> existing = null;
             try {
@@ -68,19 +69,21 @@ public class LiveKitTokenIssuer implements TokenIssuer {
             }
             if (existing != null) {
                 for (LivekitIngress.IngressInfo info : existing) {
-                    if (info.getStreamKey() != null && !info.getStreamKey().isBlank()) {
-                        return new ObsPublish(config.rtmpPublicUrl(), info.getStreamKey());
+                    if (ingressName.equals(info.getName()) && info.getStreamKey() != null
+                            && !info.getStreamKey().isBlank()) {
+                        return toObsPublish(protocol, info);
                     }
                 }
             }
+            LivekitIngress.IngressInput inputType = protocol == ObsProtocol.WHIP
+                    ? LivekitIngress.IngressInput.WHIP_INPUT : LivekitIngress.IngressInput.RTMP_INPUT;
             LivekitIngress.IngressInfo created = ingressService
-                    .createIngress("obs-" + roomName, roomName,
-                            "obs-" + roomName, null, LivekitIngress.IngressInput.RTMP_INPUT)
+                    .createIngress(ingressName, roomName, ingressName, null, inputType)
                     .execute().body();
             if (created == null || created.getStreamKey() == null) {
                 throw new ApiException(50201, "ingress create failed");
             }
-            return new ObsPublish(config.rtmpPublicUrl(), created.getStreamKey());
+            return toObsPublish(protocol, created);
         } catch (ApiException e) {
             throw e;
         } catch (Exception e) {
@@ -88,8 +91,30 @@ public class LiveKitTokenIssuer implements TokenIssuer {
         }
     }
 
+    /** 对外展示地址：RTMP 用固定配置；WHIP 用配置基础地址 + API 返回的路径 */
+    private ObsPublish toObsPublish(ObsProtocol protocol, LivekitIngress.IngressInfo info) {
+        String url;
+        if (protocol == ObsProtocol.WHIP) {
+            String path = "";
+            try {
+                String apiUrl = info.getUrl();
+                if (apiUrl != null) {
+                    int schemeEnd = apiUrl.indexOf("://");
+                    int slash = apiUrl.indexOf('/', schemeEnd < 0 ? 0 : schemeEnd + 3);
+                    path = slash >= 0 ? apiUrl.substring(slash) : "";
+                }
+            } catch (Exception ignored) {
+                // 解析失败退化为无路径
+            }
+            url = config.whipPublicUrl().replaceAll("/+$", "") + path;
+        } else {
+            url = config.rtmpPublicUrl();
+        }
+        return new ObsPublish(protocol.name(), url, info.getStreamKey());
+    }
+
     /** OBS 推流信息 */
-    public record ObsPublish(String url, String streamKey) {}
+    public record ObsPublish(String protocol, String url, String streamKey) {}
 
     private AccessToken baseToken(String identity) {
         AccessToken token = new AccessToken(config.apiKey(), config.apiSecret());

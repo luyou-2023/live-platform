@@ -9,4 +9,6 @@ public record LivekitConfig(
         String apiKey,
         String apiSecret,
         /** OBS 推流对外地址（宿主端口映射后的 RTMP URL，路径须与 ingress 一致） */
-        @DefaultValue("rtmp://127.0.0.1:19350/live") String rtmpPublicUrl) {}
+        @DefaultValue("rtmp://127.0.0.1:19350/live") String rtmpPublicUrl,
+        /** WHIP 推流对外地址（宿主端口映射后的 ingress WHIP 基础地址） */
+        @DefaultValue("http://127.0.0.1:8088") String whipPublicUrl) {}
