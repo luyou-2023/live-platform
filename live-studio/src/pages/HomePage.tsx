@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { api, currentUser, logout } from '../api';
+import { useAuthGuard } from './useAuthGuard';
 
 export default function HomePage() {
+  useAuthGuard();
   const nav = useNavigate();
   const [rooms, setRooms] = useState<any[]>([]);
   const [title, setTitle] = useState('');

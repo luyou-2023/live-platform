@@ -14,6 +14,12 @@ async function req(method: string, path: string, body?: any): Promise<any> {
   if (t) headers['Authorization'] = 'Bearer ' + t;
   const res = await fetch(BASE + path, { method, headers, body: body ? JSON.stringify(body) : undefined });
   const env = await res.json();
+  if (env.code === 40100) {
+    localStorage.removeItem('lp_token');
+    localStorage.removeItem('lp_user');
+    if (!location.pathname.startsWith('/login')) location.href = '/login';
+    throw new Error('登录已过期，请重新登录');
+  }
   if (env.code !== 0) throw new Error(env.message || ('code ' + env.code));
   return env.data;
 }

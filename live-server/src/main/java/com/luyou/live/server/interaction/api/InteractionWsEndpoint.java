@@ -122,6 +122,6 @@ public class InteractionWsEndpoint extends TextWebSocketHandler {
         Map<String, Object> frame = new LinkedHashMap<>();
         frame.put("type", type);
         frame.put("payload", payload);
-        session.sendMessage(new TextMessage(objectMapper.writeValueAsString(frame)));
+        registry.sendToSession(session, objectMapper.writeValueAsString(frame));
     }
 }

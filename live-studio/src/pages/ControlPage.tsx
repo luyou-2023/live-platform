@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Room } from 'livekit-client';
 import { api, connectRoomWs, currentUser } from '../api';
+import { useAuthGuard } from './useAuthGuard';
 
 interface Comment { commentId: string; userId: string; nickname: string; content: string; }
 
 export default function ControlPage() {
+  useAuthGuard();
   const { roomId = '' } = useParams();
   const [room, setRoom] = useState<any>(null);
   const [comments, setComments] = useState<Comment[]>([]);

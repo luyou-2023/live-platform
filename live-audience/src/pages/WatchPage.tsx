@@ -2,10 +2,12 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Room } from 'livekit-client';
 import { api, connectRoomWs } from '../api';
+import { useAuthGuard } from './useAuthGuard';
 
 interface Comment { commentId: string; userId: string; nickname: string; content: string; }
 
 export default function WatchPage() {
+  useAuthGuard();
   const { roomId = '' } = useParams();
   const nav = useNavigate();
   const [room, setRoom] = useState<any>(null);
