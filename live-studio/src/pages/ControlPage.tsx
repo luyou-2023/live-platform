@@ -20,6 +20,7 @@ export default function ControlPage() {
   const modeKey = `lp_mode_${roomId}`;
   const [err, setErr] = useState('');
   const [publishing, setPublishing] = useState(false);
+  const [starting, setStarting] = useState(false);
   const lkRoomRef = useRef<Room | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
 
@@ -72,6 +73,13 @@ export default function ControlPage() {
     lkRoomRef.current = lk;
     (window as any).__lkRoom = lk;
     setPublishing(true);
+    // 摄像头/麦克风被系统或其他应用（OBS、微信等）抢走时， track 会 ended：明确提示而非无声黑屏
+    lk.localParticipant.trackPublications.forEach(pub => {
+      pub.track?.mediaStreamTrack?.addEventListener('ended', () => {
+        setPublishing(false);
+        setErr('摄像头/麦克风已停止：可能被 OBS、微信等应用占用。关闭占用程序后点「重新推流」恢复。');
+      });
+    });
     lk.localParticipant.videoTrackPublications.forEach(pub => {
       const el = pub.videoTrack?.attach();
       if (el && previewRef.current) previewRef.current.appendChild(el);
@@ -81,6 +89,8 @@ export default function ControlPage() {
   /** 选择推流方式后开播：WebRTC=本机摄像头，RTMP=OBS 推流只显示推流地址 */
   async function start(chosen: 'WEBRTC' | 'RTMP') {
     setErr('');
+    if (starting) return;
+    setStarting(true);
     setMode(chosen);
     try {
       const res = await api.startRoom(roomId);
@@ -92,6 +102,7 @@ export default function ControlPage() {
         await connectAndPublish(res.livekit);
       }
     } catch (e: any) { setErr(e.message); }
+    finally { setStarting(false); }
   }
 
   // 页面刷新后房间仍直播中但本机推流已断：补签 token 重新推流（WebRTC 路径）
@@ -154,8 +165,8 @@ export default function ControlPage() {
               ))}
             </div>
             <div className="row" style={{ marginTop: 14 }}>
-              <button onClick={() => mode && start(mode)} disabled={mode === null || publishing}>
-                2. {room?.status === 'ENDED' ? '重新开播' : '开始直播'}
+              <button onClick={() => mode && start(mode)} disabled={mode === null || starting}>
+                2. {starting ? '开播中…' : room?.status === 'ENDED' ? '重新开播' : '开始直播'}
               </button>
               {mode === null && <span className="muted">← 先点上方选择一种推流方式</span>}
             </div>
