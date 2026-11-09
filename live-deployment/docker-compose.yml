@@ -1,0 +1,30 @@
+name: live-platform
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: live_platform
+    ports:
+      - "13306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "16379:6379"
+
+  livekit:
+    image: livekit/livekit-server:latest
+    command: --dev --bind 0.0.0.0
+    ports:
+      - "7880:7880"     # HTTP API
+      - "7881:7881"     # WebSocket
+      - "50000-50100:50000-50100/udp"   # WebRTC 媒体
+    environment:
+      LIVEKIT_KEYS: "devkey: secret"
+
+volumes:
+  mysql-data:

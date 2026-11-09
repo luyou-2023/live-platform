@@ -1,0 +1,20 @@
+# ---- Java ----
+target/
+*.class
+*.jar
+!.mvn/wrapper/*.jar
+
+# ---- Node ----
+node_modules/
+dist/
+*.local
+
+# ---- IDE / OS ----
+.idea/
+.vscode/
+*.iml
+.DS_Store
+
+# ---- 环境 ----
+.env
+*.pem

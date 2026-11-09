@@ -1,0 +1,12 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: live-server
+
+# LiveKit Server 连接（本地 compose 见 live-deployment/）
+livekit:
+  url: "ws://localhost:7880"
+  api-key: "devkey"
+  api-secret: "secret"
