@@ -56,6 +56,16 @@ public class RoomService {
         return new StartResult(toView(room, anchorNickname(operatorId)), token);
     }
 
+    /** 直播中补签发布 token（页面刷新后重新推流，不改变房间状态） */
+    @Transactional(readOnly = true)
+    public StartResult republish(String roomId, String operatorId) {
+        LiveRoom room = load(roomId);
+        room.assertAnchor(operatorId);
+        if (room.getStatus() != LiveRoom.RoomStatus.LIVING) throw new ApiException(40906, "room not living");
+        LivekitToken token = tokenIssuer.issuePublisher(room.getId(), operatorId);
+        return new StartResult(toView(room, anchorNickname(operatorId)), token);
+    }
+
     @Transactional
     public RoomView stop(String roomId, String operatorId) {
         LiveRoom room = load(roomId);

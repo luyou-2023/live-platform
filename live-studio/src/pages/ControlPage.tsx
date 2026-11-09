@@ -12,6 +12,7 @@ export default function ControlPage() {
   const [room, setRoom] = useState<any>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [online, setOnline] = useState(0);
+  const [likes, setLikes] = useState(0);
   const [err, setErr] = useState('');
   const [publishing, setPublishing] = useState(false);
   const lkRoomRef = useRef<Room | null>(null);
@@ -24,6 +25,7 @@ export default function ControlPage() {
       if (r.status === 'LIVING') {
         const snap = await api.snapshot(roomId);
         setOnline(snap.online);
+        setLikes(snap.likes);
         setComments(snap.comments);
       }
     } catch (e: any) { setErr(e.message); }
@@ -39,27 +41,41 @@ export default function ControlPage() {
         if (type === 'auth.ok') setOnline(payload.online);
         if (type === 'comment.new') setComments(cs => [...cs.slice(-199), payload]);
         if (type === 'presence.heartbeat') setOnline(payload.online);
+        if (type === 'like.batch') setLikes(payload.total);
         if (type === 'room.ended') setRoom((r: any) => r ? { ...r, status: 'ENDED' } : r);
       },
     });
     return () => ws.close();
   }, [roomId, living]);
 
+  async function connectAndPublish(livekit: any) {
+    const lk = new Room();
+    await lk.connect(livekit.serverUrl, livekit.token);
+    await lk.localParticipant.enableCameraAndMicrophone();
+    lkRoomRef.current = lk;
+    (window as any).__lkRoom = lk;
+    setPublishing(true);
+    lk.localParticipant.videoTrackPublications.forEach(pub => {
+      const el = pub.videoTrack?.attach();
+      if (el && previewRef.current) previewRef.current.appendChild(el);
+    });
+  }
+
   async function start() {
     setErr('');
     try {
       const res = await api.startRoom(roomId);
       setRoom(res.room);
-      const lk = new Room();
-      await lk.connect(res.livekit.serverUrl, res.livekit.token);
-      await lk.localParticipant.enableCameraAndMicrophone();
-      lkRoomRef.current = lk;
-      (window as any).__lkRoom = lk;
-      setPublishing(true);
-      lk.localParticipant.videoTrackPublications.forEach(pub => {
-        const el = pub.videoTrack?.attach();
-        if (el && previewRef.current) previewRef.current.appendChild(el);
-      });
+      await connectAndPublish(res.livekit);
+    } catch (e: any) { setErr(e.message); }
+  }
+
+  // 页面刷新后房间仍直播中但本机推流已断：补签 token 重新推流
+  async function republish() {
+    setErr('');
+    try {
+      const res = await api.republishRoom(roomId);
+      await connectAndPublish(res.livekit);
     } catch (e: any) { setErr(e.message); }
   }
 
@@ -80,15 +96,20 @@ export default function ControlPage() {
 
   return (
     <div className="page">
-      <h2>{room?.title || '直播间'} <span className="muted">在线 {online}</span></h2>
+      <h2>{room?.title || '直播间'} <span className="muted">在线 {online} · 赞 {likes}</span></h2>
       {err && <div className="muted" style={{ color: '#f87171' }}>{err}</div>}
       <div className="card">
         {room?.status !== 'LIVING' ? (
           <button onClick={start} disabled={publishing}>{room?.status === 'ENDED' ? '重新开播（摄像头+麦克风）' : '开播（摄像头+麦克风）'}</button>
-        ) : (
+        ) : publishing ? (
           <div className="row">
             <span style={{ color: '#4ade80' }}>● 推流中</span>
             <button className="red" onClick={stop}>下播</button>
+          </div>
+        ) : (
+          <div className="row">
+            <span style={{ color: '#fbbf24' }}>房间直播中，但本机推流已断开（页面刷新导致）</span>
+            <button onClick={republish}>重新推流</button>
           </div>
         )}
         <div ref={previewRef} className="row" style={{ marginTop: 12, flexWrap: 'wrap' }} />

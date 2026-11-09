@@ -35,6 +35,11 @@ public class RoomController {
         return ApiResponse.ok(roomService.start(roomId, AuthContext.requireUid()));
     }
 
+    @PostMapping("/{roomId}/republish")
+    public ApiResponse<StartResult> republish(@PathVariable String roomId) {
+        return ApiResponse.ok(roomService.republish(roomId, AuthContext.requireUid()));
+    }
+
     @PostMapping("/{roomId}/stop")
     public ApiResponse<RoomView> stop(@PathVariable String roomId) {
         return ApiResponse.ok(roomService.stop(roomId, AuthContext.requireUid()));
